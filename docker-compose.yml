@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./BackEnd
+    container_name: lazyio_backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+    env_file:
+      - BackEnd/config.env
+    environment:
+      - MONGO_DB_URI=mongodb://mongo:27017
+    volumes:
+      - ./BackEnd/downloads:/app/downloads
+      - ./BackEnd/temp_uploads:/app/temp_uploads
+
+  mongo:
+    image: mongo:latest
+    container_name: lazyio_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
