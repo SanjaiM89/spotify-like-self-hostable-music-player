@@ -26,18 +26,17 @@ class TelegramClientWrapper:
         if not all([API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL]):
             raise ValueError("Missing Telegram Config (API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL)")
         
-        # Use MongoDB session storage for persistence across container restarts
-        from mongo_session import MongoStorage
-        
+        # Use in_memory session - peer cache stored separately in MongoDB
         self.app = Client(
             name="SpotifyCloneBot",
             api_id=int(API_ID),
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
-            storage=MongoStorage("SpotifyCloneBot"),
+            in_memory=True,
         )
         self.bin_channel = BIN_CHANNEL
-        self._main_loop = None  # Store reference to main event loop
+        self._main_loop = None
+        self._channel_access_hash = None  # Cached from MongoDB
 
     async def start(self):
         import asyncio
@@ -48,8 +47,9 @@ class TelegramClientWrapper:
         await self._resolve_bin_channel()
 
     async def _resolve_bin_channel(self):
-        """Attempt to resolve the bin channel peer on startup using raw API."""
+        """Attempt to resolve the bin channel peer on startup."""
         from pyrogram import raw
+        from peer_cache import get_peer, save_peer
         
         chat_id = self.bin_channel
         
@@ -59,35 +59,45 @@ class TelegramClientWrapper:
         else:
             raw_channel_id = abs(chat_id)
         
-        print(f"Attempting raw API resolution for channel {raw_channel_id}...")
+        # 1. Try to load cached access_hash from MongoDB
+        cached_hash = await get_peer(raw_channel_id)
+        if cached_hash:
+            print(f"[PeerCache] Loaded cached access_hash for channel {raw_channel_id}")
+            self._channel_access_hash = cached_hash
+            
+            # Verify it works
+            try:
+                input_channel = raw.types.InputChannel(
+                    channel_id=raw_channel_id,
+                    access_hash=cached_hash
+                )
+                result = await self.app.invoke(
+                    raw.functions.channels.GetFullChannel(channel=input_channel)
+                )
+                chat_title = getattr(result.chats[0], 'title', 'Unknown')
+                print(f"Resolved BIN_CHANNEL from cache: {chat_title}")
+                return
+            except Exception as e:
+                print(f"Cached access_hash invalid: {e}")
         
+        # 2. Try direct resolution (works locally with session file nearby)
         try:
-            # Use raw API with access_hash=0 - works for bots that are admins
-            input_channel = raw.types.InputChannel(
-                channel_id=raw_channel_id,
-                access_hash=0
-            )
+            chat = await self.app.get_chat(chat_id)
+            print(f"Resolved BIN_CHANNEL directly: {chat.title or chat.id}")
             
-            # This call forces Pyrogram to cache the peer
-            result = await self.app.invoke(
-                raw.functions.channels.GetFullChannel(channel=input_channel)
-            )
-            
-            # Store the proper peer for future operations
-            chat_title = getattr(result.chats[0], 'title', 'Unknown')
-            print(f"Resolved BIN_CHANNEL via raw API: {chat_title}")
-            
-            # Update bin_channel to use proper marked ID format
-            if not str(chat_id).startswith("-100"):
-                self.bin_channel = int(f"-100{raw_channel_id}")
-            
+            # Save the access_hash to MongoDB for future use
+            if hasattr(chat, 'id'):
+                # Get the access hash from internal cache
+                peer = await self.app.resolve_peer(chat_id)
+                if hasattr(peer, 'access_hash'):
+                    await save_peer(raw_channel_id, peer.access_hash)
+                    self._channel_access_hash = peer.access_hash
             return
-            
         except Exception as e:
-            print(f"Raw API resolution failed: {e}")
+            print(f"Direct resolution failed: {e}")
         
         print("WARNING: Could not resolve BIN_CHANNEL. Uploads may fail.")
-        print("IMPORTANT: Make sure the bot is added as an admin to the channel!")
+        print("TIP: Run locally first to seed the peer cache in MongoDB.")
 
     async def stop(self):
         try:
