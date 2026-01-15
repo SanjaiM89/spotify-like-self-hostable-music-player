@@ -2,7 +2,7 @@ import asyncio
 import os
 import mimetypes
 from typing import AsyncGenerator, Dict, Any, Optional
-from pyrogram import Client
+from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 from dotenv import load_dotenv
@@ -40,11 +40,14 @@ class TelegramClientWrapper:
         self._main_loop = None
         self._channel_access_hash = None  # Cached from MongoDB
 
-        @self.app.on_message()
+        @self.app.on_message(filters.command("start"))
+        async def start_command(client, message):
+             await message.reply_text(f"I am here! 🎵\nBot is online.\nSession Mode: {'Memory' if self.app.in_memory else 'Disk'}")
+
+        @self.app.on_message(filters.all & filters.chat(self.bin_channel))
         async def seeding_handler(client, message):
             from peer_cache import save_peer
-            # Check if message is from our BIN_CHANNEL
-            if message.chat and message.chat.id == self.bin_channel:
+
                 print(f"🎯 msg received from BIN_CHANNEL ({message.chat.title})! Saving access_hash...")
                 
                 # Extract raw ID
