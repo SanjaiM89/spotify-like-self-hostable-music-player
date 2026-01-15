@@ -46,38 +46,43 @@ class TelegramClientWrapper:
         await self._resolve_bin_channel()
 
     async def _resolve_bin_channel(self):
-        """Attempt to resolve the bin channel peer on startup."""
+        """Attempt to resolve the bin channel peer on startup using raw API."""
+        from pyrogram import raw
+        
         chat_id = self.bin_channel
         
-        # 1. Try direct get_chat first
+        # Extract the actual channel ID from marked ID (-100XXXXXXXXXX -> XXXXXXXXXX)
+        if str(chat_id).startswith("-100"):
+            raw_channel_id = int(str(abs(chat_id))[3:])
+        else:
+            raw_channel_id = abs(chat_id)
+        
+        print(f"Attempting raw API resolution for channel {raw_channel_id}...")
+        
         try:
-            chat = await self.app.get_chat(chat_id)
-            print(f"Resolved BIN_CHANNEL: {chat.title or chat.id}")
+            # Use raw API with access_hash=0 - works for bots that are admins
+            input_channel = raw.types.InputChannel(
+                channel_id=raw_channel_id,
+                access_hash=0
+            )
+            
+            # This call forces Pyrogram to cache the peer
+            result = await self.app.invoke(
+                raw.functions.channels.GetFullChannel(channel=input_channel)
+            )
+            
+            # Store the proper peer for future operations
+            chat_title = getattr(result.chats[0], 'title', 'Unknown')
+            print(f"Resolved BIN_CHANNEL via raw API: {chat_title}")
+            
+            # Update bin_channel to use proper marked ID format
+            if not str(chat_id).startswith("-100"):
+                self.bin_channel = int(f"-100{raw_channel_id}")
+            
             return
+            
         except Exception as e:
-            print(f"Direct resolution failed for {chat_id}: {e}")
-
-        # 2. Try get_chat_member to force resolution (Works for Bots)
-        print("Attempting to resolve via get_chat_member...")
-        try:
-            # Getting 'me' (the bot itself) as a member often forces the peer to be cached
-            me = await self.app.get_me()
-            headers = await self.app.get_chat_member(chat_id, me.id)
-            print(f"Found BIN_CHANNEL via member check: {headers.chat.title}")
-            return
-        except Exception as e:
-             print(f"Error checking chat member: {e}")
-
-        # 3. Try fallback with -100 prefix if not already present
-        if str(chat_id).startswith("-") and not str(chat_id).startswith("-100"):
-            new_id = int(f"-100{abs(chat_id)}")
-            try:
-                chat = await self.app.get_chat(new_id)
-                print(f"Resolved BIN_CHANNEL with -100 prefix: {chat.title or chat.id}")
-                self.bin_channel = new_id
-                return
-            except Exception:
-                pass
+            print(f"Raw API resolution failed: {e}")
         
         print("WARNING: Could not resolve BIN_CHANNEL. Uploads may fail.")
         print("IMPORTANT: Make sure the bot is added as an admin to the channel!")
