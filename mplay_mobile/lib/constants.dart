@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 
 // Replace with your backend IP
-// For Android Emulator use: 'http://10.0.2.2:8000'
-// For Physical Device use your PC's IP (e.g., 192.168.1.5)
-const String baseUrl = 'http://10.0.2.2:8000'; 
-const String wsUrl = 'ws://10.0.2.2:8000/ws';
+// For Physical Device use your PC's IP
+const String baseUrl = 'http://10.218.87.86:8000'; 
+const String wsUrl = 'ws://10.218.87.86:8000/ws';
 
 // Colors
 
