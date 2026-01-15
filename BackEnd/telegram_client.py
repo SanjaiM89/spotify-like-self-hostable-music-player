@@ -57,15 +57,16 @@ class TelegramClientWrapper:
         except Exception as e:
             print(f"Direct resolution failed for {chat_id}: {e}")
 
-        # 2. Iterate dialogs to populate cache (Crucial for in_memory sessions)
-        print("Iterating dialogs to find BIN_CHANNEL...")
+        # 2. Try get_chat_member to force resolution (Works for Bots)
+        print("Attempting to resolve via get_chat_member...")
         try:
-            async for dialog in self.app.get_dialogs(limit=50):
-                if dialog.chat.id == chat_id:
-                     print(f"Found BIN_CHANNEL in dialogs: {dialog.chat.title}")
-                     return
+            # Getting 'me' (the bot itself) as a member often forces the peer to be cached
+            me = await self.app.get_me()
+            headers = await self.app.get_chat_member(chat_id, me.id)
+            print(f"Found BIN_CHANNEL via member check: {headers.chat.title}")
+            return
         except Exception as e:
-             print(f"Error iterating dialogs: {e}")
+             print(f"Error checking chat member: {e}")
 
         # 3. Try fallback with -100 prefix if not already present
         if str(chat_id).startswith("-") and not str(chat_id).startswith("-100"):
