@@ -11,5 +11,4 @@ httpx
 jinja2
 motor
 dnspython
-audioop-lts
 yt-dlp
