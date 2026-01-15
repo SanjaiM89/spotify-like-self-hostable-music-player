@@ -26,13 +26,15 @@ class TelegramClientWrapper:
         if not all([API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL]):
             raise ValueError("Missing Telegram Config (API_ID, API_HASH, BOT_TOKEN, BIN_CHANNEL)")
         
-        # Use in_memory session to avoid auth conflicts on container restarts
+        # Use MongoDB session storage for persistence across container restarts
+        from mongo_session import MongoStorage
+        
         self.app = Client(
             name="SpotifyCloneBot",
             api_id=int(API_ID),
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
-            in_memory=True, # Critical for Render deployment
+            storage=MongoStorage("SpotifyCloneBot"),
         )
         self.bin_channel = BIN_CHANNEL
         self._main_loop = None  # Store reference to main event loop
