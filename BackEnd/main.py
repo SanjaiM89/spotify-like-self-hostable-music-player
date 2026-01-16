@@ -29,7 +29,9 @@ async def refresh_ai_recommendations():
             print("[AI] Starting hourly recommendations refresh...")
             all_songs = await get_all_songs()
             if all_songs:
-                result = await get_homepage_recommendations(all_songs)
+                # Fetch liked songs for personalization
+                liked_songs = await get_liked_songs()
+                result = await get_homepage_recommendations(all_songs, liked_songs)
                 await update_ai_cache(
                     recommendations=result["recommendations"],
                     ai_playlist_name=result["ai_playlist"]["name"],

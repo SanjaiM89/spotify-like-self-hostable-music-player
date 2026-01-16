@@ -117,9 +117,10 @@ Return ONLY the playlist name, nothing else."""
     }
 
 
-async def get_homepage_recommendations(all_songs: List[Dict]) -> Dict:
+async def get_homepage_recommendations(all_songs: List[Dict], liked_songs: List[Dict] = None) -> Dict:
     """
     Generate recommendations for homepage (called hourly).
+    Uses liked_songs to personalize AI recommendations.
     Returns {"recommendations": [...], "ai_playlist": {...}}
     """
     if not all_songs:
@@ -128,15 +129,25 @@ async def get_homepage_recommendations(all_songs: List[Dict]) -> Dict:
             "ai_playlist": {"name": "AI Mix", "song_ids": []}
         }
     
-    # Get recommendations based on random songs
     import random
-    sample_song = random.choice(all_songs) if all_songs else {}
     
-    recommendations = await get_music_recommendations(sample_song, all_songs[:5])
+    # Use liked songs if available, otherwise use random
+    if liked_songs and len(liked_songs) > 0:
+        # Base recommendations on user's liked songs
+        sample_song = random.choice(liked_songs)
+        history = liked_songs[:5]
+        print(f"[AI] Using {len(liked_songs)} liked songs for personalization")
+    else:
+        sample_song = random.choice(all_songs) if all_songs else {}
+        history = all_songs[:5]
+        print("[AI] No liked songs, using random sample")
+    
+    recommendations = await get_music_recommendations(sample_song, history)
     ai_playlist = await generate_ai_playlist(all_songs)
     
     return {
         "recommendations": recommendations,
         "ai_playlist": ai_playlist
     }
+
 
