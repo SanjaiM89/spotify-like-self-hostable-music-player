@@ -20,6 +20,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
   bool _isLoading = true;
   List<Song> _songs = [];
   bool _isPlaying = false;
+  bool _isSaved = false;
 
   @override
   void initState() {
@@ -61,16 +62,34 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
     setState(() => _isPlaying = true);
   }
 
-  void _addToMyLibrary() {
-    // Logic to add to user's personal playlists would go here
-    // For now, show a snackbar
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Added to your library!"),
-        backgroundColor: kPrimaryColor,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+  Future<void> _addToMyLibrary() async {
+    if (_isSaved) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final success = await ApiService.importAppPlaylist(widget.playlist.id);
+      if (success) {
+        setState(() => _isSaved = true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Saved to your Playlists!"),
+              backgroundColor: kPrimaryColor,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print("Error importing playlist: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to save playlist"), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -251,11 +270,14 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
                       GlassContainer(
                         borderRadius: 30,
                         padding: EdgeInsets.zero,
-                        color: Colors.white.withOpacity(0.1),
+                        color: _isSaved ? kPrimaryColor : Colors.white.withOpacity(0.1),
                         child: IconButton(
                           onPressed: _addToMyLibrary,
-                          icon: const Icon(Icons.favorite_border, color: Colors.white),
-                          tooltip: "Add to My Playlist",
+                          icon: Icon(
+                            _isSaved ? Icons.playlist_add_check : Icons.playlist_add, 
+                            color: Colors.white,
+                          ),
+                          tooltip: _isSaved ? "Saved to Library" : "Save as Playlist",
                         ),
                       ),
                     ],

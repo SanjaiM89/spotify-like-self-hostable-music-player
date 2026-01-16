@@ -245,4 +245,10 @@ class ApiService {
       body: json.encode({'name': 'Discovery Mix'}),
     );
   }
+
+  /// Import App Playlist to User Library
+  static Future<bool> importAppPlaylist(String playlistId) async {
+    final response = await http.post(Uri.parse('$baseUrl/api/playlists/import-app-playlist/$playlistId'));
+    return response.statusCode == 200;
+  }
 }

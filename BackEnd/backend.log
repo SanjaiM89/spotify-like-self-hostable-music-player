@@ -1,28 +1,15 @@
 TgCrypto is missing! Pyrogram will work the same, but at a much slower speed. More info: https://docs.pyrogram.org/topics/speedups
-INFO:     Started server process [131296]
+INFO:     Started server process [136512]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
-INFO:     10.218.87.86:40448 - "WebSocket /ws" [accepted]
+INFO:     10.218.87.86:51526 - "WebSocket /ws" [accepted]
 INFO:     connection open
-INFO:     10.218.87.86:40464 - "WebSocket /ws" [accepted]
+INFO:     10.218.87.86:51540 - "WebSocket /ws" [accepted]
 INFO:     connection open
+INFO:     Shutting down
 INFO:     connection closed
 INFO:     connection closed
-INFO:     10.218.87.86:48954 - "WebSocket /ws" [accepted]
-INFO:     connection open
-INFO:     10.218.87.86:48986 - "WebSocket /ws" [accepted]
-INFO:     connection open
-DEBUG: API_ID=33688695 BIN_CHANNEL=-1003261092648
-Telegram Client Started (Session Mode: Disk)
-[PeerCache] Loaded cached access_hash for channel 3261092648
-Resolved BIN_CHANNEL from cache: dump
-[AI] Starting hourly recommendations refresh...
-[AI] Using 4 liked songs for personalization
-[AI] Cached: 5 recs, playlist 'Eclectic Mood Mix'
-INFO:     10.218.87.86:48978 - "GET /api/youtube/tasks?page=1&limit=50 HTTP/1.1" 200 OK
-INFO:     10.218.87.86:48970 - "GET /api/app-playlists HTTP/1.1" 200 OK
-INFO:     10.218.87.86:48976 - "GET /api/songs HTTP/1.1" 200 OK
-INFO:     10.218.87.86:48998 - "GET /api/playlists HTTP/1.1" 200 OK
-INFO:     10.218.87.86:48960 - "GET /api/home HTTP/1.1" 200 OK
-INFO:     10.218.87.86:49544 - "GET /api/app-playlists/696a3d2e36a56f599e6b7baa HTTP/1.1" 200 OK
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [136512]

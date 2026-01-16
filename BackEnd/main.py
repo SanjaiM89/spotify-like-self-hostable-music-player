@@ -932,6 +932,32 @@ async def list_playlists(page: int = 1, limit: int = 10):
     return await get_playlists(page=page, limit=limit)
 
 
+@app.post("/api/playlists/import-app-playlist/{playlist_id}")
+async def import_app_playlist(playlist_id: str):
+    """Import an App Playlist to User Library"""
+    # Get App Playlist
+    app_pl = await get_playlist_with_songs(playlist_id)
+    if not app_pl:
+        raise HTTPException(status_code=404, detail="App Playlist not found")
+    
+    # Create User Playlist
+    name = app_pl.get("name", "Imported Playlist")
+    song_ids = [s["id"] for s in app_pl.get("songs", [])]
+    
+    new_id = await create_playlist(name=name, songs=song_ids)
+    
+    # Notify clients
+    await notify_update("library_updated")
+    
+    return {"status": "success", "id": new_id, "name": name}
+
+
+@app.get("/api/playlists")
+async def list_playlists(page: int = 1, limit: int = 10):
+    """Get paginated playlists"""
+    return await get_playlists(page=page, limit=limit)
+
+
 @app.post("/api/playlists")
 async def new_playlist(request: CreatePlaylistRequest):
     """Create a new playlist"""
