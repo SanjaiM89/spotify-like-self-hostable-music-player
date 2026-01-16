@@ -101,8 +101,18 @@ class _MainScreenState extends State<MainScreen> {
     _wsService = WebSocketService();
     _wsService.connect();
     
-    // Listen for updates
+    // Listen for library updates
+    _wsService.onLibraryUpdate = (data) {
+      print("WS Library Update Received: Refreshing views");
+      setState(() {
+        _libraryKey = UniqueKey();
+        _homeKey = UniqueKey();
+      });
+    };
+    
+    // Task updates are handled by YouTubeScreen directly via a stream
     _wsService.onMessage = (msg) {
+      // Backwards compatibility - string events
       if (msg == 'library_updated' || msg == 'song_added') {
         print("WS Update Received: Refreshing views");
         setState(() {
@@ -112,6 +122,8 @@ class _MainScreenState extends State<MainScreen> {
       }
     };
   }
+  
+  WebSocketService get wsService => _wsService;
 
   void _handleNavigation(int index, [String? query]) {
     setState(() {

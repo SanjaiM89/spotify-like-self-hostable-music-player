@@ -11,6 +11,12 @@ subprojects {
 }
 subprojects {
     project.evaluationDependsOn(':app')
+    
+    // Fix for "warnings found and -Werror specified"
+    tasks.withType(JavaCompile) {
+        options.compilerArgs << "-Xlint:-options"
+        options.warnings = false
+    }
 }
 
 tasks.register("clean", Delete) {

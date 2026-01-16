@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 // Replace with your backend IP
 // Production Render URL
-const String baseUrl = 'https://spotify-like-self-hostable-music-player.onrender.com'; 
-const String wsUrl = 'wss://spotify-like-self-hostable-music-player.onrender.com/ws';
+const String baseUrl = 'http://10.218.87.86:8080'; 
+const String wsUrl = 'ws://10.218.87.86:8080/ws';
 
 // Colors
 

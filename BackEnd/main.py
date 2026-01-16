@@ -77,6 +77,8 @@ TEMP_DIR = "temp_uploads"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 # --- WebSocket Manager ---
+import json
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -86,7 +88,8 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
         for connection in self.active_connections:
@@ -94,6 +97,11 @@ class ConnectionManager:
                 await connection.send_text(message)
             except:
                 pass
+
+    async def broadcast_json(self, data: dict):
+        """Broadcast JSON data to all connected clients"""
+        message = json.dumps(data)
+        await self.broadcast(message)
 
 manager = ConnectionManager()
 
@@ -107,8 +115,19 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 # Helper to notify clients
-async def notify_update(event_type: str = "song_added"):
-    await manager.broadcast(event_type)
+async def notify_update(event_type: str = "song_added", data: dict = None):
+    """Broadcast an event to all WebSocket clients"""
+    payload = {"event": event_type}
+    if data:
+        payload["data"] = data
+    await manager.broadcast_json(payload)
+
+async def broadcast_task_update(task_id: str):
+    """Broadcast a task update to all WebSocket clients"""
+    task = get_task(task_id)
+    if task:
+        await notify_update("task_update", task.to_dict())
+
 
 
 @app.post("/api/upload")
@@ -290,11 +309,27 @@ async def sync_task_to_db(task_id: str):
 
 
 async def process_youtube_download(task_id: str, url: str, quality: str):
-    """Background task for downloading YouTube audio and uploading to Telegram"""
+    """Background task for downloading YouTube content and uploading to Telegram"""
     print(f"[MAIN] Starting process_youtube_download for {task_id}")
     try:
-        # Download audio
-        task = await youtube_downloader.download_audio(url, quality, task_id)
+        # Determine if it's audio or video based on quality string
+        # If quality is "Best Video" or ends with "p" (e.g. 1080p), it's video
+        is_video = quality == "best" or quality.endswith("p")
+        
+        # Create a sync callback for progress updates
+        def on_progress(task):
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(broadcast_task_update(task.task_id))
+            except RuntimeError:
+                pass
+        
+        if is_video:
+             task = await youtube_downloader.download_video(url, quality, task_id, broadcast_callback=on_progress)
+        else:
+             task = await youtube_downloader.download_audio(url, quality, task_id, broadcast_callback=on_progress)
+             
         print(f"[MAIN] Download complete, status: {task.status}, file: {task.file_path}")
         
         # Sync to DB during download
@@ -309,16 +344,66 @@ async def process_youtube_download(task_id: str, url: str, quality: str):
         print(f"[MAIN] Uploading to Telegram: {task.file_path}")
         
         # Store upload progress info in task
-        upload_info = {"current": 0, "total": 0, "speed": 0}
+        import time
+        upload_start_time = time.time()
+        
+        # Use a closure with state
+        class UploadState:
+            def __init__(self):
+                self.last_time = time.time()
+                self.last_current = 0
+                self.start_time = time.time()
+
+        state = UploadState()
         
         def on_upload_progress(current, total, speed):
-            upload_info["current"] = current
-            upload_info["total"] = total
-            upload_info["speed"] = speed
-            # Update progress: 85-100% for upload phase
-            if total > 0:
-                upload_pct = (current / total) * 15  # 15% of total for upload
-                task.progress = 85 + upload_pct
+            now = time.time()
+            dt = now - state.last_time
+            
+            # Update stats every 0.5s to avoid spam
+            if dt > 0.5 or current == total:
+                # Use speed provided by telegram_client (bytes/s)
+                if speed and speed > 0:
+                    if speed > 1024 * 1024:
+                        task.speed = f"{speed / (1024 * 1024):.2f} MiB/s"
+                    else:
+                        task.speed = f"{speed / 1024:.2f} KiB/s"
+                    
+                    # Calculate ETA using provided speed
+                    remaining = total - current
+                    eta_seconds = remaining / speed
+                    m, s = divmod(int(eta_seconds), 60)
+                    h, m = divmod(m, 60)
+                    task.eta = f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+                else:
+                    task.speed = "0 B/s"
+                    task.eta = "--:--"
+                
+                # Update downloaded field to reflect uploaded bytes
+                task.downloaded_bytes = current
+                task.total_bytes = total
+                
+                # Update progress: 85-100% for upload phase
+                if total > 0:
+                    upload_pct = (current / total) * 15  # 15% of total for upload
+                    task.progress = 85 + upload_pct
+                
+                # Sync state
+                state.last_time = now
+                state.last_current = current
+                
+                # Broadcast update via WebSocket (non-blocking)
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(broadcast_task_update(task_id))
+                except RuntimeError:
+                    pass  # No running loop, ignore
+            
+            # Check for cancellation
+            if task_id in youtube_downloader._cancelled_tasks:
+                print(f"[MAIN] Upload cancelled by user for {task_id}")
+                raise ValueError("Download cancelled by user")
         
         tg_msg = await tg_client.upload_file(task.file_path, progress_callback=on_upload_progress)
         if not tg_msg:
@@ -336,7 +421,7 @@ async def process_youtube_download(task_id: str, url: str, quality: str):
             file_size = os.path.getsize(task.file_path)
         
         # Determine file extension from path
-        file_name = os.path.basename(task.file_path) if task.file_path else f"{task.title}.mp3"
+        file_name = os.path.basename(task.file_path) if task.file_path else f"{task.title}.{'mp4' if is_video else 'mp3'}"
         
         # Save to songs database
         song_id = await add_song(
@@ -358,6 +443,8 @@ async def process_youtube_download(task_id: str, url: str, quality: str):
         await notify_update("library_updated")
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         youtube_downloader.mark_failed(task_id, str(e))
         await sync_task_to_db(task_id)
     finally:
@@ -393,7 +480,8 @@ async def youtube_download(request: YouTubeRequest):
         raise HTTPException(status_code=400, detail="Invalid YouTube URL")
     
     # Validate quality
-    valid_qualities = ["320", "256", "192", "128", "m4a"]
+    # Validate quality
+    valid_qualities = ["320", "256", "192", "128", "m4a", "best", "2160p", "1440p", "1080p", "720p", "480p", "360p"]
     quality = request.quality if request.quality in valid_qualities else "320"
     
     # Check for playlist or single video and extract info

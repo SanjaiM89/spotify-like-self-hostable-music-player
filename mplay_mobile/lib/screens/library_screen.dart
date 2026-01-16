@@ -5,6 +5,7 @@ import '../models.dart';
 import '../music_provider.dart';
 import '../widgets/song_tile.dart';
 import '../constants.dart';
+import 'video_player_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -406,7 +407,16 @@ class _LibraryScreenState extends State<LibraryScreen> with SingleTickerProvider
                         song: song,
                         isPlaying: music.currentSong?.id == song.id,
                         onTap: () {
-                          music.playSong(song, _filteredSongs);
+                          if (song.fileName.toLowerCase().endsWith('.mp4') || song.fileName.toLowerCase().endsWith('.mkv')) {
+                             Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => VideoPlayerScreen(song: song),
+                              ),
+                            );
+                          } else {
+                            music.playSong(song, _filteredSongs);
+                          }
                         },
                       ),
                     );

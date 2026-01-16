@@ -38,6 +38,13 @@ class YouTubeTask {
   final String? title;
   final String? error;
   final Map<String, dynamic>? uploadInfo;
+  final String? speed;
+  final String? eta;
+  final int? totalBytes;
+  final int? downloadedBytes;
+  final String? songId;
+  final String? mediaType; // 'audio' or 'video'
+  final String? quality;
 
   YouTubeTask({
     required this.taskId,
@@ -47,6 +54,13 @@ class YouTubeTask {
     this.title,
     this.error,
     this.uploadInfo,
+    this.speed,
+    this.eta,
+    this.totalBytes,
+    this.downloadedBytes,
+    this.songId,
+    this.mediaType,
+    this.quality,
   });
 
   factory YouTubeTask.fromJson(Map<String, dynamic> json) {
@@ -58,6 +72,13 @@ class YouTubeTask {
       title: json['title'],
       error: json['error'],
       uploadInfo: json['upload_info'],
+      speed: json['speed'],
+      eta: json['eta'],
+      totalBytes: json['total'],
+      downloadedBytes: json['downloaded'],
+      songId: json['song_id'],
+      mediaType: json['media_type'],
+      quality: json['quality'],
     );
   }
 }

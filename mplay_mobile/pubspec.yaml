@@ -21,6 +21,8 @@ dependencies:
   flutter_animate: ^4.2.0
   glassmorphism: ^3.0.0
   percent_indicator: ^4.2.3
+  video_player: 2.8.6
+  chewie: 1.7.0
 
 dev_dependencies:
   flutter_test:

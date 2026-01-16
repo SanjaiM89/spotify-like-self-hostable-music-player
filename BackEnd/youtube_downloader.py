@@ -46,7 +46,17 @@ class DownloadTask:
     telegram_msg_id: Optional[int] = None
     song_id: Optional[str] = None
     
+    # New stats fields
+    speed: str = "0 B/s"
+    eta: str = "00:00"
+    downloaded_bytes: int = 0
+    total_bytes: int = 0
+    
     def to_dict(self) -> Dict[str, Any]:
+        # Determine media type from quality
+        video_qualities = ['best', '1080p', '720p', '480p', '360p']
+        media_type = 'video' if self.quality in video_qualities else 'audio'
+        
         return {
             "task_id": self.task_id,
             "url": self.url,
@@ -59,7 +69,12 @@ class DownloadTask:
             "file_size": self.file_size,
             "error": self.error,
             "quality": self.quality,
+            "media_type": media_type,
             "song_id": self.song_id,
+            "speed": self.speed,
+            "eta": self.eta,
+            "downloaded": self.downloaded_bytes,
+            "total": self.total_bytes,
         }
 
 
@@ -196,8 +211,11 @@ class YouTubeDownloader:
             "video_id": info.get("id", ""),
         }
     
-    def _create_progress_hook(self, task: DownloadTask):
+    def _create_progress_hook(self, task: DownloadTask, broadcast_callback=None):
         """Create a progress hook for yt-dlp"""
+        import time
+        last_broadcast = [0]  # Use list to allow modification in closure
+        
         def hook(d):
             if task.task_id in self._cancelled_tasks:
                 raise ValueError("Download cancelled by user")
@@ -209,22 +227,169 @@ class YouTubeDownloader:
                 total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
                 downloaded = d.get("downloaded_bytes", 0)
                 
+                # Save stats
+                task.downloaded_bytes = downloaded
+                task.total_bytes = total
+                
+                # Format speed
+                speed_raw = d.get("speed", 0) # bytes/s
+                if speed_raw:
+                     # Convert to MiB/s or KiB/s
+                     if speed_raw > 1024 * 1024:
+                         task.speed = f"{speed_raw / (1024 * 1024):.2f} MiB/s"
+                     else:
+                         task.speed = f"{speed_raw / 1024:.2f} KiB/s"
+                else:
+                    task.speed = "0 B/s"
+                
+                # Format ETA
+                eta_seconds = d.get("eta", 0)
+                if eta_seconds:
+                    m, s = divmod(eta_seconds, 60)
+                    h, m = divmod(m, 60)
+                    if h > 0:
+                        task.eta = f"{h:02d}:{m:02d}:{s:02d}"
+                    else:
+                        task.eta = f"{m:02d}:{s:02d}"
+                else:
+                    task.eta = "--:--"
+
                 if total > 0:
                     task.progress = (downloaded / total) * 80  # Reserve 20% for conversion/upload
                     task.file_size = total
+                
+                # Broadcast update every 0.5s
+                now = time.time()
+                if broadcast_callback and (now - last_broadcast[0] > 0.5):
+                    broadcast_callback(task)
+                    last_broadcast[0] = now
                     
             elif d["status"] == "finished":
                 task.status = DownloadStatus.CONVERTING
                 task.progress = 80
                 task.file_path = d.get("filename", "")
+                task.speed = "Complete"
+                task.eta = "00:00"
+                if broadcast_callback:
+                    broadcast_callback(task)
                 
         return hook
     
+    async def download_video(
+        self, 
+        url: str, 
+        quality: str = "best", # "best" or specific resolution e.g. "1080p"
+        task_id: Optional[str] = None,
+        broadcast_callback=None
+    ) -> DownloadTask:
+        """Download video from YouTube URL"""
+        
+        # Create or get task
+        if task_id and task_id in _download_tasks:
+            task = _download_tasks[task_id]
+        else:
+            task_id = task_id or str(uuid.uuid4())
+            task = DownloadTask(
+                task_id=task_id,
+                url=url,
+                quality=quality
+            )
+            _download_tasks[task_id] = task
+        
+        # Validate URL
+        if not self.is_youtube_url(url):
+            task.status = DownloadStatus.FAILED
+            task.error = "Invalid YouTube URL"
+            return task
+            
+        try:
+            # Fetch video info first
+            task.status = DownloadStatus.FETCHING_INFO
+            info = await self.get_video_info(url)
+            task.title = info["title"]
+            task.artist = info["artist"]
+            task.thumbnail = info["thumbnail"]
+            task.duration = info["duration"]
+            task.progress = 5
+            
+            # Setup download options
+            output_template = os.path.join(
+                DOWNLOAD_DIR, 
+                f"{task_id}_%(title)s.%(ext)s"
+            )
+            
+            # Select format based on quality
+            # "bestvideo+bestaudio/best" is standard for best quality
+            # Merge output to mp4/mkv. We prefer mp4 for compatibility
+            format_str = f"bestvideo[height<={quality[:-1]}]+bestaudio/best" if quality != "best" and quality.endswith("p") else "bestvideo+bestaudio/best"
+            
+            opts = {
+                "format": format_str,
+                "outtmpl": output_template,
+                "quiet": True,
+                "no_warnings": True,
+                "progress_hooks": [self._create_progress_hook(task, broadcast_callback)],
+                "merge_output_format": "mp4",
+                "writethumbnail": True,
+                "embedthumbnail": True,
+                "postprocessor_args": [
+                    "-metadata", f"title={task.title}",
+                    "-metadata", f"artist={task.artist}",
+                ],
+            }
+            
+            # Download in thread pool
+            def _download():
+                print(f"[YT] Starting VIDEO download for task {task_id}")
+                with YoutubeDL(opts) as ydl:
+                    ydl.download([url])
+                print(f"[YT] Video Download complete for task {task_id}")
+            
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _download)
+            
+            # Find the output file
+            print(f"[YT] Looking for video files in {DOWNLOAD_DIR} with prefix {task_id}")
+            
+            for filename in os.listdir(DOWNLOAD_DIR):
+                if filename.startswith(task_id) and (filename.endswith(".mp4") or filename.endswith(".mkv")):
+                    task.file_path = os.path.join(DOWNLOAD_DIR, filename)
+                    task.file_size = os.path.getsize(task.file_path)
+                    print(f"[YT] Matched video file: {task.file_path} ({task.file_size} bytes)")
+                    break
+            
+            if not task.file_path or not os.path.exists(task.file_path):
+                raise FileNotFoundError("Downloaded video file not found")
+            
+            # Use the new video processor to checking/compressing
+            from video_processor import compress_video_if_needed
+            task.status = DownloadStatus.CONVERTING # Reusing status for compression check
+            print(f"[YT] Checking compression for {task.file_path}")
+            task.file_path = await compress_video_if_needed(task.file_path)
+            task.file_size = os.path.getsize(task.file_path)
+            
+            task.status = DownloadStatus.UPLOADING
+            task.progress = 85
+            print(f"[YT] Ready for upload: {task.file_path}")
+            
+            return task
+            
+        except Exception as e:
+            if task.task_id in self._cancelled_tasks:
+                task.status = DownloadStatus.CANCELLED
+                task.error = "Cancelled by user"
+                self._cancelled_tasks.discard(task.task_id)
+            else:
+                task.status = DownloadStatus.FAILED
+                task.error = str(e)
+            return task
+
     async def download_audio(
         self, 
         url: str, 
         quality: str = "320",
-        task_id: Optional[str] = None
+        task_id: Optional[str] = None,
+        broadcast_callback=None
     ) -> DownloadTask:
         """Download audio from YouTube URL"""
         
@@ -270,7 +435,7 @@ class YouTubeDownloader:
                 "outtmpl": output_template,
                 "quiet": True,
                 "no_warnings": True,
-                "progress_hooks": [self._create_progress_hook(task)],
+                "progress_hooks": [self._create_progress_hook(task, broadcast_callback)],
                 "postprocessors": [
                     {
                         "key": "FFmpegExtractAudio",
