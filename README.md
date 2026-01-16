@@ -70,6 +70,27 @@ The project consists of two main parts:
     ```
     *Server will start at `http://0.0.0.0:8000`*
 
+### 1. Backend Setup (Docker - Faster) 🐳
+
+Instead of setting up Python manually, you can use the pre-built Docker image.
+
+1.  **Create a Config File**:
+    Create a file named `config.env` and populate it with your credentials (see step 4 of manual setup above).
+
+2.  **Pull & Run**:
+    ```bash
+    # Pull the latest image
+    docker pull sanjaim86/lazyio:latest
+
+    # Run the container (background mode)
+    docker run -d \
+      --name lazyio-backend \
+      --env-file config.env \
+      -p 8000:8000 \
+      sanjaim86/lazyio:latest
+    ```
+    *The backend is now running on port 8000.*
+
 ### 2. Mobile App Setup
 
 1.  Navigate to the mobile app directory:
