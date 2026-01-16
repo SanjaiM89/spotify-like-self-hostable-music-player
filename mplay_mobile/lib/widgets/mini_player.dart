@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../music_provider.dart';
 import 'glass_container.dart';
 import '../screens/player_screen.dart';
+import '../screens/video_player_screen.dart';
 import '../constants.dart';
 
 class MiniPlayer extends StatelessWidget {
@@ -23,12 +24,24 @@ class MiniPlayer extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => const PlayerScreen(),
-            fullscreenDialog: true,
-          ),
-        );
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (song.isVideo) {
+            // If it's a video, open Video Player
+             Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => VideoPlayerScreen(song: song),
+              ),
+            );
+          } else {
+            // Audio Player
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const PlayerScreen(),
+                fullscreenDialog: true,
+              ),
+            );
+          }
+        });
       },
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),

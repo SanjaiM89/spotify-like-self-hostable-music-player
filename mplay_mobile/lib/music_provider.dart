@@ -62,6 +62,13 @@ class MusicProvider with ChangeNotifier {
     _playlist = playlist;
     _currentSong = song;
     _currentIndex = _playlist.indexWhere((s) => s.id == song.id);
+    
+    if (_currentIndex == -1) {
+      // Song not in playlist? Add it or fallback
+      print("Warning: Song not found in playlist, adding it momentarily");
+      _playlist.insert(0, song);
+      _currentIndex = 0;
+    }
     notifyListeners();
 
     try {

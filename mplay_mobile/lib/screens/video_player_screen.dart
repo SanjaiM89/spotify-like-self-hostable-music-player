@@ -122,10 +122,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   Future<void> _playAudio(Song song) async {
     try {
+      // Ensure we have the latest song list so the provider can find the index
       final songs = await ApiService.getSongs();
       if (mounted) {
         Provider.of<MusicProvider>(context, listen: false).playSong(song, songs);
-        Navigator.pop(context); // Go back to let mini player show
+        
+        // Schedule the pop to avoid _debugLocked assertion if this runs during a build frame
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+        });
       }
     } catch (e) {
       print("Error playing audio: $e");
