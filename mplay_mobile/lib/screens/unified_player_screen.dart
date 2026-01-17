@@ -134,6 +134,17 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
               return;
            }
            
+           // Auto-next: Check if video has completed
+           final pos = _videoController!.value.position;
+           final dur = _videoController!.value.duration;
+           // If position is at or past duration and video is not playing, trigger next
+           if (dur.inMilliseconds > 0 && pos >= dur && !_videoController!.value.isPlaying) {
+              print("Video completed, triggering next...");
+              final music = Provider.of<MusicProvider>(context, listen: false);
+              music.next();
+              return;
+           }
+           
            // Update for buffering changes
            if (_videoController!.value.isBuffering != _isVideoLoading) {
               setState(() {}); 
