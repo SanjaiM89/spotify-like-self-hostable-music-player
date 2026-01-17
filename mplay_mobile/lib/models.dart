@@ -48,6 +48,23 @@ class Song {
       hasVideo: json['has_video'] ?? false,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'artist': artist,
+      'album': album,
+      'duration': duration,
+      'cover_art': coverArt,
+      'thumbnail': thumbnail,
+      'file_name': fileName,
+      'media_type': mediaType,
+      'audio_telegram_id': audioTelegramId,
+      'video_telegram_id': videoTelegramId,
+      'has_video': hasVideo,
+    };
+  }
 }
 
 

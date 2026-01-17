@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'models.dart';
 import 'api_service.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:just_audio_background/just_audio_background.dart';
 
@@ -16,6 +18,7 @@ class MusicProvider with ChangeNotifier {
   Duration _duration = Duration.zero;
 
   MusicProvider() {
+    _loadState(); // Load saved state
     _audioPlayer.setLoopMode(LoopMode.all); // Enable looping by default
     
     _audioPlayer.playerStateStream.listen((state) {
@@ -42,6 +45,47 @@ class MusicProvider with ChangeNotifier {
     });
   }
 
+  // Sync with running audio service if app is restarted
+  Future<void> _syncWithAudioService() async {
+    // If we're already playing but currentSong is null (restart case)
+    if (_audioPlayer.playing && _currentSong == null) {
+      if (_audioPlayer.sequenceState != null && 
+          _audioPlayer.sequenceState!.currentSource != null) {
+          
+          final source = _audioPlayer.sequenceState!.currentSource;
+          if (source is UriAudioSource && source.tag is MediaItem) {
+            final item = source.tag as MediaItem;
+            
+            // Try to find in playlist first
+            if (_playlist.isNotEmpty) {
+               final index = _playlist.indexWhere((s) => s.id == item.id);
+               if (index != -1) {
+                 _currentIndex = index;
+                 _currentSong = _playlist[index];
+                 notifyListeners();
+                 return;
+               }
+            }
+            
+            // Fallback: Reconstruct minimal Song from MediaItem
+            _currentSong = Song(
+              id: item.id,
+              title: item.title,
+              artist: item.artist ?? 'Unknown Artist',
+              album: item.album ?? '',
+              duration: item.duration?.inSeconds.toDouble() ?? 0,
+              coverArt: item.artUri?.toString(),
+              fileName: '',
+              hasVideo: false,
+            );
+            _playlist = [_currentSong!];
+            _currentIndex = 0;
+            notifyListeners();
+          }
+      }
+    }
+  }
+
   Song? get currentSong => _currentSong;
   bool get isPlaying => _isPlaying;
   Duration get position => _position;
@@ -54,6 +98,7 @@ class MusicProvider with ChangeNotifier {
     // but usually setting a new playlist implies a fresh start or context switch.
     // For now, simple assignment.
     notifyListeners();
+    _saveState();
   }
 
   Future<void> playSong(Song song, List<Song> playlist) async {
@@ -70,6 +115,7 @@ class MusicProvider with ChangeNotifier {
       _playlist.insert(0, song);
       _currentIndex = 0;
     }
+    _saveState();
     notifyListeners();
 
     try {
@@ -163,6 +209,76 @@ class MusicProvider with ChangeNotifier {
     await _audioPlayer.stop();
     _isPlaying = false;
     _currentSong = null;
+    _saveState(); // Clear state or save null
     notifyListeners();
+  }
+
+  // Persistence Methods
+  Future<void> _saveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_currentSong != null) {
+      prefs.setString('current_song', jsonEncode(_currentSong!.toJson()));
+    } else {
+      prefs.remove('current_song');
+    }
+    
+    if (_playlist.isNotEmpty) {
+      final playlistJson = _playlist.map((s) => s.toJson()).toList();
+      prefs.setString('playlist', jsonEncode(playlistJson));
+    } else {
+      prefs.remove('playlist');
+    }
+    
+    prefs.setInt('current_index', _currentIndex);
+    prefs.setInt('last_playback_mode', _lastPlaybackMode);
+    prefs.setBool('should_restore_player', _shouldRestorePlayer);
+  }
+
+  // Playback mode: 0 = audio, 1 = video
+  int _lastPlaybackMode = 0;
+  bool _shouldRestorePlayer = false;
+  
+  int get lastPlaybackMode => _lastPlaybackMode;
+  bool get shouldRestorePlayer => _shouldRestorePlayer;
+  
+  void setPlaybackMode(int mode, {bool shouldRestore = true}) {
+    _lastPlaybackMode = mode;
+    _shouldRestorePlayer = shouldRestore;
+    _saveState();
+  }
+  
+  void clearRestoreFlag() {
+    _shouldRestorePlayer = false;
+    _saveState();
+  }
+
+  Future<void> _loadState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      final String? songJson = prefs.getString('current_song');
+      if (songJson != null) {
+        _currentSong = Song.fromJson(jsonDecode(songJson));
+      }
+      
+      final String? playlistJson = prefs.getString('playlist');
+      if (playlistJson != null) {
+        final List<dynamic> decoded = jsonDecode(playlistJson);
+        _playlist = decoded.map((j) => Song.fromJson(j)).toList();
+      }
+      
+      _currentIndex = prefs.getInt('current_index') ?? -1;
+      _lastPlaybackMode = prefs.getInt('last_playback_mode') ?? 0;
+      _shouldRestorePlayer = prefs.getBool('should_restore_player') ?? false;
+      
+      if (_currentSong != null) {
+        notifyListeners();
+      }
+      
+      // Sync with active session
+      _syncWithAudioService();
+    } catch (e) {
+      print("Error loading state: $e");
+    }
   }
 }

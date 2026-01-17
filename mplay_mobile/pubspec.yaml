@@ -25,6 +25,8 @@ dependencies:
   chewie: 1.7.0
   dio: ^5.9.0
   path_provider: ^2.1.4
+  wakelock_plus: ^1.2.8
+  shared_preferences: ^2.2.2
 
 dev_dependencies:
   flutter_test:

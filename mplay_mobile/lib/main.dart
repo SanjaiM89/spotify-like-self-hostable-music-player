@@ -13,6 +13,7 @@ import 'widgets/mini_player.dart';
 import 'library_provider.dart';
 import 'providers/video_provider.dart';
 import 'widgets/video_overlay.dart';
+import 'screens/unified_player_screen.dart';
 
 Future<void> main() async {
   await JustAudioBackground.init(
@@ -119,6 +120,11 @@ class _MainScreenState extends State<MainScreen> {
       });
     };
     
+    // Check if we should restore player screen
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAndRestorePlayer();
+    });
+    
     // Task updates are handled by YouTubeScreen directly via a stream
     _wsService.onMessage = (msg) {
       // Backwards compatibility - string events
@@ -130,6 +136,30 @@ class _MainScreenState extends State<MainScreen> {
         });
       }
     };
+  }
+  
+  void _checkAndRestorePlayer() {
+    final musicProvider = Provider.of<MusicProvider>(context, listen: false);
+    
+    // If there's a song to restore and flag is set
+    if (musicProvider.shouldRestorePlayer && musicProvider.currentSong != null) {
+      final song = musicProvider.currentSong!;
+      final startWithVideo = musicProvider.lastPlaybackMode == 1;
+      
+      // Clear the restore flag
+      musicProvider.clearRestoreFlag();
+      
+      // Navigate to player screen
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => UnifiedPlayerScreen(
+            song: song,
+            startWithVideo: startWithVideo,
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+    }
   }
   
   WebSocketService get wsService => _wsService;

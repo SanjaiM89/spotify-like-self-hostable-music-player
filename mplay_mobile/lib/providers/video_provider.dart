@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../models.dart';
 import '../constants.dart';
 import '../api_service.dart';
+import '../music_provider.dart';
 
 class VideoProvider with ChangeNotifier {
   VideoPlayerController? _videoPlayerController;
@@ -40,7 +41,7 @@ class VideoProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final streamUrl = ApiService.getStreamUrl(video.id);
+      final streamUrl = ApiService.getStreamUrl(video.id, type: 'video');
       
       _videoPlayerController = VideoPlayerController.networkUrl(
         Uri.parse(streamUrl),
@@ -98,6 +99,25 @@ class VideoProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Close video and switch to audio playback in background
+  void closeAndSwitchToAudio(MusicProvider musicProvider) {
+    if (_videoPlayerController != null && _videoPlayerController!.value.isInitialized) {
+      final position = _videoPlayerController!.value.position;
+      
+      // Resume audio from the same position
+      if (_currentVideo != null) {
+        musicProvider.seek(position);
+        musicProvider.resume();
+      }
+    }
+    
+    _disposeControllers();
+    _currentVideo = null;
+    _isMinimized = false;
+    notifyListeners();
+  }
+  
+  /// Close video without switching to audio
   void close() {
     _disposeControllers();
     _currentVideo = null;

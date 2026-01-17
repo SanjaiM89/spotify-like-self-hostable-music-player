@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 // Replace with your backend IP
-// Production Render URL
-const String baseUrl = 'http://10.218.87.86:8080'; 
-const String wsUrl = 'ws://10.218.87.86:8080/ws';
+// For same WiFi: use local IP. For public: use tunnel but streaming has issues
+const String baseUrl = 'http://146.70.142.134:47409'; 
+const String wsUrl = 'ws://146.70.142.134:47409/ws';
 
 // Colors
 

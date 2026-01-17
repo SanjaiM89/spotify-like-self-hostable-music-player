@@ -263,6 +263,10 @@ async def stream_song(song_id: str, request: Request, type: str = None):
             "Accept-Ranges": "bytes",
             "Content-Length": str(content_length),
             "Content-Type": file_info["mime_type"],
+            # Cloudflare/Proxy compatibility
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Connection": "keep-alive",
         }
         
         return StreamingResponse(

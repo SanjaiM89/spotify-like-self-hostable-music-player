@@ -11,7 +11,9 @@ import '../models.dart';
 
 import '../library_provider.dart';
 import '../services/video_cache_service.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'dart:io';
+import 'dart:async';
 
 /// Unified Player Screen - YouTube Music Style
 /// Features Song/Video toggle, unified controls, and tabs
@@ -30,7 +32,7 @@ class UnifiedPlayerScreen extends StatefulWidget {
 }
 
 class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   // Mode: 0 = Song (Audio), 1 = Video
   int _mode = 0;
   
@@ -52,6 +54,7 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _mode = widget.startWithVideo && widget.song.hasVideo ? 1 : 0;
     _tabController = TabController(length: 3, vsync: this);
     
@@ -65,7 +68,21 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // App went to background
+      if (_mode == 1) {
+        // If in Video mode, switch to Song mode (Audio) so background audio service takes over
+        print("App backgrounded: Switching to Song Mode for background playback");
+        _onModeChanged(0);
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    WakelockPlus.disable(); // Ensure screen can sleep
+    WidgetsBinding.instance.removeObserver(this);
     _videoController?.dispose();
     _chewieController?.dispose();
     _tabController.dispose();
@@ -98,6 +115,7 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
     if (!widget.song.hasVideo) return;
     
     setState(() => _isVideoLoading = true);
+    WakelockPlus.enable(); // Keep screen on during video playback
     
     try {
       final streamUrl = ApiService.getStreamUrl(widget.song.id, type: 'video');
@@ -187,9 +205,11 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
   }
 
   void _onModeChanged(int newMode) {
-    if (newMode == _mode) return;
-    
     final musicProvider = Provider.of<MusicProvider>(context, listen: false);
+    
+    // Save playback mode for restoration
+    musicProvider.setPlaybackMode(newMode);
+    if (newMode == _mode) return;
     
     if (newMode == 1 && widget.song.hasVideo) {
       // Switching to Video mode
@@ -219,6 +239,9 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
         _chewieController = null;
         _videoController = null;
         _isVideoLoading = false;
+        
+        // Disable Wakelock when switching to audio
+        WakelockPlus.disable();
       }
       
       if (videoPosition != null) {
@@ -248,6 +271,44 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
     });
   }
 
+  void _switchToVideoMiniPlayer() {
+    try {
+      // Hand off to VideoProvider for video mini-player
+      final videoProvider = Provider.of<VideoProvider>(context, listen: false);
+      
+      // Get current position to seek
+      Duration? currentPosition;
+      if (_videoController != null && _videoController!.value.isInitialized) {
+        currentPosition = _videoController!.value.position;
+        _videoController!.pause();
+      }
+      
+      // Play in VideoProvider and minimize
+      videoProvider.playVideo(widget.song).then((_) {
+        // Seek to current position after initialization
+        if (currentPosition != null && videoProvider.videoPlayerController != null) {
+          videoProvider.videoPlayerController!.seekTo(currentPosition);
+        }
+        videoProvider.minimize();
+      });
+    } catch (e) {
+      print("Error switching to video mini-player: $e");
+    }
+  }
+  
+  void _switchToAudioOnClose() {
+    try {
+      if (_videoController != null && _videoController!.value.isInitialized) {
+        final position = _videoController!.value.position;
+        final musicProvider = Provider.of<MusicProvider>(context, listen: false);
+        musicProvider.seek(position);
+        musicProvider.resume();
+      }
+    } catch (e) {
+      print("Error switching to audio on close: $e");
+    }
+  }
+
   void _enterFullScreen() {
     if (_videoController == null || !_videoController!.value.isInitialized) return;
     
@@ -258,23 +319,76 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
       DeviceOrientation.portraitUp,
     ]);
 
+    // State variables in method scope (persisted across StatefulBuilder rebuilds)
+    bool controlsVisible = true;
+    Timer? hideTimer;
+
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: Stack(
-              children: [
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: _videoController!.value.aspectRatio,
-                    child: VideoPlayer(_videoController!),
-                  ),
+        builder: (_) => StatefulBuilder(
+          builder: (context, setStateOverlay) {
+            
+            void startHideTimer() {
+              hideTimer?.cancel();
+              hideTimer = Timer(const Duration(seconds: 3), () {
+                if (controlsVisible) {
+                  setStateOverlay(() => controlsVisible = false);
+                }
+              });
+            }
+
+            void toggleControls() {
+              setStateOverlay(() {
+                controlsVisible = !controlsVisible;
+                if (controlsVisible) {
+                  startHideTimer();
+                } else {
+                  hideTimer?.cancel();
+                }
+              });
+            }
+
+            // Start timer on first build only
+            if (hideTimer == null && controlsVisible) {
+              // Use post-frame callback to avoid calling during build
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                startHideTimer();
+              });
+            }
+
+            return Scaffold(
+              backgroundColor: Colors.black,
+              body: SafeArea(
+                child: Stack(
+                  children: [
+                    Center(
+                      child: AspectRatio(
+                        aspectRatio: _videoController!.value.aspectRatio,
+                        child: VideoPlayer(_videoController!),
+                      ),
+                    ),
+                    // Tap detector for toggling controls
+                    Positioned.fill(
+                      child: GestureDetector(
+                        onTap: toggleControls,
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(color: Colors.transparent),
+                      ),
+                    ),
+                    // Controls Overlay
+                    AnimatedOpacity(
+                      opacity: controlsVisible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 300),
+                      child: IgnorePointer(
+                        ignoring: !controlsVisible,
+                        child: _buildFullScreenOverlay(),
+                      ),
+                    ),
+                  ],
                 ),
-                _buildFullScreenOverlay(),
-              ],
-            ),
-          ),
+              ),
+            );
+          }
         ),
         fullscreenDialog: true,
       ),
@@ -405,8 +519,15 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kBackgroundColor,
+    return PopScope(
+      canPop: true,
+      onPopInvoked: (didPop) {
+        if (didPop && _mode == 1) {
+             _switchToVideoMiniPlayer();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: kBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
@@ -429,6 +550,7 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -439,7 +561,10 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
         children: [
           IconButton(
             icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 28),
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              if (_mode == 1) _switchToVideoMiniPlayer();
+              Navigator.pop(context);
+            },
           ),
           const Spacer(),
           // Song / Video Toggle

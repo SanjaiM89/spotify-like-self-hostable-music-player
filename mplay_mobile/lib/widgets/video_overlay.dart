@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:chewie/chewie.dart';
 import 'package:video_player/video_player.dart';
 import '../providers/video_provider.dart';
+import '../music_provider.dart';
 import '../constants.dart';
+import '../screens/unified_player_screen.dart';
 
 class VideoOverlay extends StatelessWidget {
   const VideoOverlay({super.key});
@@ -201,11 +203,37 @@ class VideoOverlay extends StatelessWidget {
 
   Widget _buildMiniPlayer(BuildContext context, VideoProvider provider) {
     final song = provider.currentVideo!;
+    
+    void openUnifiedPlayer() {
+      // Get current position before closing
+      Duration? position;
+      if (provider.videoPlayerController != null && 
+          provider.videoPlayerController!.value.isInitialized) {
+        position = provider.videoPlayerController!.value.position;
+      }
+      
+      // Close video provider
+      provider.close();
+      
+      // Navigate to UnifiedPlayerScreen in video mode
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => UnifiedPlayerScreen(
+            song: song, 
+            startWithVideo: true,
+            // Note: We can't easily pass position to UnifiedPlayerScreen
+            // without modifying its constructor. For now, it starts from beginning.
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+    }
+    
     return GestureDetector(
-      onTap: () => provider.maximize(),
+      onTap: openUnifiedPlayer,
       onVerticalDragEnd: (details) {
          if (details.primaryVelocity! < -300) {
-           provider.maximize();
+           openUnifiedPlayer();
          }
       },
       child: Container(
@@ -266,7 +294,10 @@ class VideoOverlay extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () => provider.close(),
+              onPressed: () {
+                final musicProvider = Provider.of<MusicProvider>(context, listen: false);
+                provider.closeAndSwitchToAudio(musicProvider);
+              },
             ),
           ],
         ),
