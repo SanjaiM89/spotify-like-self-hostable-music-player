@@ -214,7 +214,7 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
     if (newMode == 1 && widget.song.hasVideo) {
       // Switching to Video mode
       final currentPosition = musicProvider.position;
-      musicProvider.stop(); // Stop audio (releases resources better than pause)
+      musicProvider.pause(); // Pause audio (don't stop - keeps currentSong for mini player)
       
       if (_videoController == null) {
         _initVideoPlayer().then((_) {
@@ -283,16 +283,14 @@ class _UnifiedPlayerScreenState extends State<UnifiedPlayerScreen>
         _videoController!.pause();
       }
       
-      // Play in VideoProvider and minimize
-      videoProvider.playVideo(widget.song).then((_) {
-        // Seek to current position after initialization
-        if (currentPosition != null && videoProvider.videoPlayerController != null) {
-          videoProvider.videoPlayerController!.seekTo(currentPosition);
-        }
+      // Play in VideoProvider with current position (uses cache if available)
+      videoProvider.playVideo(widget.song, startPosition: currentPosition).then((_) {
         videoProvider.minimize();
       });
     } catch (e) {
       print("Error switching to video mini-player: $e");
+      // Fallback to audio
+      _switchToAudioOnClose();
     }
   }
   

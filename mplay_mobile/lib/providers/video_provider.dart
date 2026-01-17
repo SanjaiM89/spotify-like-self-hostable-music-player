@@ -6,6 +6,7 @@ import '../models.dart';
 import '../constants.dart';
 import '../api_service.dart';
 import '../music_provider.dart';
+import '../services/video_cache_service.dart';
 
 class VideoProvider with ChangeNotifier {
   VideoPlayerController? _videoPlayerController;
@@ -23,10 +24,13 @@ class VideoProvider with ChangeNotifier {
 
   List<Song> _recommendations = [];
 
-  Future<void> playVideo(Song video) async {
-    // If same video, just maximize and play
+  Future<void> playVideo(Song video, {Duration? startPosition}) async {
+    // If same video, just maximize and play from position
     if (_currentVideo?.id == video.id && _videoPlayerController != null) {
       _isMinimized = false;
+      if (startPosition != null) {
+        _videoPlayerController!.seekTo(startPosition);
+      }
       _videoPlayerController!.play();
       notifyListeners();
       return;
@@ -41,13 +45,28 @@ class VideoProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final streamUrl = ApiService.getStreamUrl(video.id, type: 'video');
+      // Check for cached video first
+      final cacheService = VideoCacheService();
+      final cachedFile = await cacheService.getCachedVideoFile(video.id);
       
-      _videoPlayerController = VideoPlayerController.networkUrl(
-        Uri.parse(streamUrl),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-      );
+      if (cachedFile != null) {
+        print("[VideoProvider] Using cached video: ${cachedFile.path}");
+        _videoPlayerController = VideoPlayerController.file(cachedFile);
+      } else {
+        print("[VideoProvider] Streaming video from network");
+        final streamUrl = ApiService.getStreamUrl(video.id, type: 'video');
+        _videoPlayerController = VideoPlayerController.networkUrl(
+          Uri.parse(streamUrl),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
+      }
+      
       await _videoPlayerController!.initialize();
+      
+      // Seek to start position if provided
+      if (startPosition != null) {
+        await _videoPlayerController!.seekTo(startPosition);
+      }
 
       _chewieController = ChewieController(
         videoPlayerController: _videoPlayerController!,
