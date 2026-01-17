@@ -12,3 +12,6 @@ jinja2
 motor
 dnspython
 yt-dlp
+requests
+pymongo
+minio

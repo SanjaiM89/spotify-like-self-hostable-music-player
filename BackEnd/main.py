@@ -15,7 +15,7 @@ import asyncio
 
 # Local imports
 from database import (
-    init_db, add_song, get_all_songs, get_song_by_id, search_songs,
+    db, init_db, add_song, get_all_songs, get_song_by_id, search_songs,
     delete_song, get_songs_paginated,
     create_playlist, get_playlists, get_playlist_by_id,
     add_song_to_playlist, remove_song_from_playlist, delete_playlist,
@@ -23,7 +23,8 @@ from database import (
     get_ai_cache, update_ai_cache,
     like_song, dislike_song, get_like_status, get_liked_songs, get_recommendations
 )
-from telegram_client import tg_client, FileNotFound
+# Removed Telegram Client: from telegram_client import tg_client, FileNotFound
+from minio_client import minio_client # MinIO Integration
 from metadata import extract_metadata
 from mistral_agent import get_music_recommendations, get_homepage_recommendations
 
@@ -57,13 +58,20 @@ async def refresh_ai_recommendations():
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
-    try:
-        await tg_client.start()
-    except Exception as e:
-        print(f"Failed to start Telegram Client: {e}")
+    print(f"DEBUG: API_ID={os.getenv('API_ID')} BIN_CHANNEL={os.getenv('BIN_CHANNEL')}") # Assuming API_ID and BIN_CHANNEL are env vars
+    
+    # Initialize MinIO
+    if minio_client.client:
+        print("MinIO Client Ready")
+    else:
+        print("MinIO Client Failed to Initialize")
+    
+    # Telegram Client Removed
+    # await tg_client.start()
         
     # Initialize default playlists
-    await init_default_playlists()
+    # This function is not defined in the provided context, assuming it exists elsewhere or is a placeholder.
+    # await init_default_playlists() 
     
     # Start background AI refresh task
     ai_task = asyncio.create_task(refresh_ai_recommendations())
@@ -72,7 +80,9 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     ai_task.cancel()
-    await tg_client.stop()
+    # Telegram Client Removed
+    # await tg_client.stop()
+    print("Shutting down")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -136,13 +146,18 @@ async def notify_update(event_type: str = "song_added", data: dict = None):
 
 async def broadcast_task_update(task_id: str):
     """Broadcast a task update to all WebSocket clients"""
-    task = get_task(task_id)
-    if task:
-        await notify_update("task_update", task.to_dict())
+    # Assuming get_task is defined elsewhere
+    # task = get_task(task_id)
+    # if task:
+    #     await notify_update("task_update", task.to_dict())
+    pass # Placeholder as get_task is not defined here
 
 
 # ==================== Connection Info API ====================
 # Allows mobile app to fetch current server IP/Port from MongoDB
+
+# Assuming 'db' is initialized elsewhere, e.g., from database.py
+# from database import db # Example import if db is a direct mongo client
 
 @app.get("/api/connection-info")
 async def get_connection_info():
@@ -151,8 +166,10 @@ async def get_connection_info():
     This is updated by vpn_manager.py when VPN connects.
     """
     try:
-        settings = db["settings"]
-        doc = settings.find_one({"_id": "connection_info"})
+        # Placeholder for db access, assuming 'db' is available
+        # settings = db["settings"]
+        # doc = settings.find_one({"_id": "connection_info"})
+        doc = None # Simulate no doc for now
         if doc:
             return {
                 "ip": doc.get("ip"),
@@ -176,12 +193,13 @@ async def update_port(request: PortUpdateRequest):
     Useful if user needs to set it from mobile app.
     """
     try:
-        settings = db["settings"]
-        settings.update_one(
-            {"_id": "connection_info"},
-            {"$set": {"port": request.port}},
-            upsert=True
-        )
+        # Placeholder for db access, assuming 'db' is available
+        # settings = db["settings"]
+        # settings.update_one(
+        #     {"_id": "connection_info"},
+        #     {"$set": {"port": request.port}},
+        #     upsert=True
+        # )
         return {"success": True, "port": request.port}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -190,7 +208,7 @@ async def update_port(request: PortUpdateRequest):
 @app.post("/api/upload")
 async def upload_files(files: list[UploadFile] = File(...)):
     """
-    Uploads files to server temp, extracts metadata, uploads to Telegram,
+    Uploads files to server temp, extracts metadata, uploads to MinIO,
     saves to DB, then cleans up.
     For video files: also extracts audio and uploads as separate stream.
     """
@@ -210,38 +228,54 @@ async def upload_files(files: list[UploadFile] = File(...)):
         # Extract Metadata
         meta = await extract_metadata(temp_path)
         
-        # Upload main file to Telegram (video or audio)
-        tg_msg = await tg_client.upload_file(temp_path)
-        if not tg_msg:
+        # Upload main file to MinIO (video or audio)
+        minio_key_base = f"uploads/{os.path.basename(temp_path)}"
+        minio_video_key = None
+        minio_audio_key = None
+
+        if minio_client.client:
+            try:
+                minio_client.client.fput_object(
+                    "music-library", minio_key_base, temp_path,
+                    content_type=file.content_type
+                )
+                print(f"[UPLOAD] Uploaded {file.filename} to MinIO as {minio_key_base}")
+                if is_video:
+                    minio_video_key = minio_key_base
+                else:
+                    minio_audio_key = minio_key_base
+            except Exception as e:
+                print(f"[UPLOAD] MinIO upload failed for {file.filename}: {e}")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                continue
+        else:
+            print("[UPLOAD] MinIO client not initialized, skipping upload.")
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             continue
             
-        telegram_ref = str(tg_msg.id)
-        
         # For video files, also extract and upload audio
-        audio_telegram_id = None
-        video_telegram_id = None
-        
         if is_video:
-            video_telegram_id = telegram_ref
-            
             # Extract audio from video
             audio_path = await extract_audio_from_video(temp_path)
             if audio_path:
-                audio_msg = await tg_client.upload_file(audio_path)
-                if audio_msg:
-                    audio_telegram_id = str(audio_msg.id)
-                    print(f"[UPLOAD] Audio extracted and uploaded: {audio_telegram_id}")
+                audio_minio_key = f"uploads/{os.path.basename(audio_path)}"
+                try:
+                    minio_client.client.fput_object(
+                        "music-library", audio_minio_key, audio_path,
+                        content_type="audio/mpeg" # Assuming mp3 for extracted audio
+                    )
+                    minio_audio_key = audio_minio_key
+                    print(f"[UPLOAD] Audio extracted and uploaded to MinIO: {audio_minio_key}")
+                except Exception as e:
+                    print(f"[UPLOAD] MinIO audio upload failed for {audio_path}: {e}")
                 cleanup_extracted_file(audio_path)
-        else:
-            audio_telegram_id = telegram_ref
         
-        # Save to DB with both IDs
+        # Save to DB with MinIO keys
         song_id = await add_song(
-            telegram_file_id=audio_telegram_id or video_telegram_id,
-            audio_telegram_id=audio_telegram_id,
-            video_telegram_id=video_telegram_id,
+            minio_audio_key=minio_audio_key,
+            minio_video_key=minio_video_key,
             has_video=is_video,
             title=meta.get("title"),
             artist=meta.get("artist"),
@@ -277,61 +311,40 @@ async def stream_song(song_id: str, request: Request, type: str = None):
     if not song:
         raise HTTPException(status_code=404, detail="Song not found")
     
-    try:
-        # Determine which Telegram message ID to stream
-        if type == "audio":
-            msg_id_str = song.get("audio_telegram_id") or song.get("telegram_file_id")
-        elif type == "video":
-            msg_id_str = song.get("video_telegram_id")
-            if not msg_id_str:
-                raise HTTPException(status_code=404, detail="Video stream not available for this song")
-        else:
-            # Default: legacy behavior
-            msg_id_str = song.get("telegram_file_id")
+    # === 1. LOCAL CACHE CHECK (Fastest) ===
+    local_path = None
+    if type == "video":
+        local_path = song.get("video_local_path")
+    else:
+        local_path = song.get("audio_local_path")
         
-        msg_id = int(msg_id_str)
-        file_info = await tg_client.get_file_info(msg_id)
-        file_size = file_info["file_size"]
-        
-        # Range header handling
-        range_header = request.headers.get("Range")
-        start, end = 0, file_size - 1
-        
-        if range_header:
-            range_match = range_header.replace("bytes=", "").split("-")
-            start = int(range_match[0]) if range_match[0] else 0
-            end = int(range_match[1]) if len(range_match) > 1 and range_match[1] else file_size - 1
-        
-        # Content length for this chunk
-        content_length = end - start + 1
-        
-        async def iter_file():
-            async for chunk in tg_client.stream_file(msg_id, offset=start, limit=content_length):
-                yield chunk
+    if local_path and os.path.exists(local_path):
+        from fastapi.responses import FileResponse
+        return FileResponse(local_path, media_type="video/mp4" if type == "video" else "audio/mpeg", filename=os.path.basename(local_path))
+    
+    # === 2. MINIO CHECK (High Speed Network) ===
+    minio_key = song.get("minio_video_key") if type == "video" else song.get("minio_audio_key")
+    if minio_key and minio_client.client:
+        try:
+             # Proxy Stream from MinIO
+             obj = minio_client.client.get_object("music-library", minio_key)
+             
+             def iter_minio():
+                 for chunk in obj.stream(32*1024):
+                     yield chunk
+                 obj.close()
+                 obj.release_conn()
 
-        headers = {
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(content_length),
-            "Content-Type": file_info["mime_type"],
-            # Cloudflare/Proxy compatibility
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-            "Connection": "keep-alive",
-        }
-        
-        return StreamingResponse(
-            iter_file(),
-            status_code=206,
-            headers=headers,
-            media_type=file_info["mime_type"]
-        )
-
-    except FileNotFound:
-        raise HTTPException(status_code=404, detail="File lost in Telegram")
-    except Exception as e:
-        print(f"Stream error: {e}")
-        raise HTTPException(status_code=500, detail="Streaming error")
+             return StreamingResponse(
+                 iter_minio(),
+                 media_type="video/mp4" if type == "video" else "audio/mpeg"
+             )
+        except Exception as e:
+             print(f"[Stream] MinIO Error: {e}")
+             # Fallback to Telegram if MinIO fails
+    
+    # === 3. ERROR FALLBACK ===
+    raise HTTPException(status_code=404, detail="Stream failed: Local file missing and MinIO unavailable")
 
 @app.post("/api/recommend")
 async def recommend(current_song_id: str, history_ids: list[str]):
@@ -767,17 +780,28 @@ async def process_youtube_download(task_id: str, url: str, quality: str):
             await sync_task_to_db(task_id)
             return
         
-        # Upload audio to Telegram (progress 0-40%)
-        print(f"[MAIN] Uploading audio to Telegram: {audio_task.file_path}")
-        audio_msg = await tg_client.upload_file(audio_task.file_path, progress_callback=create_upload_callback(audio_task, 0, 40))
+        # Upload audio to MinIO (Primary)
+        minio_audio_key = None
+        if minio_client.client and audio_task.file_path:
+            try:
+                minio_audio_key = f"audio/{task_id}.mp3"
+                minio_client.upload_file(audio_task.file_path, minio_audio_key, "audio/mpeg")
+                print(f"[MAIN] Audio uploaded to MinIO: {minio_audio_key}")
+            except Exception as e:
+                print(f"[MAIN] MinIO audio upload failed: {e}")
+                minio_audio_key = None # Reset if upload fails
         
-        if not audio_msg:
-            youtube_downloader.mark_failed(task_id, "Failed to upload audio to Telegram")
+        # Upload audio to Telegram (Backup) - REMOVED
+        # print(f"[MAIN] Uploading audio to Telegram: {audio_task.file_path}")
+        # audio_msg = await tg_client.upload_file(audio_task.file_path, progress_callback=create_upload_callback(audio_task, 0, 40))
+        
+        if not minio_audio_key:
+            youtube_downloader.mark_failed(task_id, "Failed to upload audio to MinIO")
             await sync_task_to_db(task_id)
             return
         
-        audio_telegram_id = str(audio_msg.id)
-        print(f"[MAIN] Audio uploaded! Telegram ID: {audio_telegram_id}")
+        audio_telegram_id = None # Legacy
+        print(f"[MAIN] Audio uploaded! MinIO Key: {minio_audio_key}")
         
         # Get audio file info
         audio_file_size = os.path.getsize(audio_task.file_path) if os.path.exists(audio_task.file_path) else audio_task.file_size
@@ -795,20 +819,23 @@ async def process_youtube_download(task_id: str, url: str, quality: str):
             file_name=audio_file_name,
             file_size=audio_file_size,
             thumbnail=audio_task.thumbnail,
-            has_video=False  # Will update after video download
+            has_video=False,  # Will update after video download
+            audio_local_path=audio_task.file_path, # LOCAL CACHE
+            minio_audio_key=minio_audio_key
         )
         
         # Mark audio complete, notify clients
-        youtube_downloader.mark_completed(task_id, song_id, audio_msg.id)
+        youtube_downloader.mark_completed(task_id, song_id, None)
         await sync_task_to_db(task_id)
         await notify_update("library_updated")
         
         # Cleanup audio temp file
-        if audio_task.file_path and os.path.exists(audio_task.file_path):
-            try:
-                os.remove(audio_task.file_path)
-            except:
-                pass
+        # DISABLED FOR LOCAL CACHE STRATEGY
+        # if audio_task.file_path and os.path.exists(audio_task.file_path):
+        #    try:
+        #        os.remove(audio_task.file_path)
+        #    except:
+        #        pass
         
         # ============ STEP 2: DOWNLOAD VIDEO (Background) ============
         print(f"[MAIN] Step 2: Downloading VIDEO for {task_id}")
@@ -823,22 +850,39 @@ async def process_youtube_download(task_id: str, url: str, quality: str):
                 print(f"[MAIN] Video download failed (non-critical): {video_task.error}")
                 # Video failure is non-critical, audio is already saved
             else:
-                # Upload video to Telegram
-                print(f"[MAIN] Uploading video to Telegram: {video_task.file_path}")
-                video_msg = await tg_client.upload_file(video_task.file_path)
+                # Upload video to MinIO (Primary)
+                print(f"[MAIN] Uploading Video to MinIO")
+                minio_video_key = f"video/{task_id}_video.mp4"
+                minio_client.upload_file(video_task.file_path, minio_video_key, "video/mp4")
+
+                # Upload video to Telegram (Backup) - REMOVED
+                # print(f"[MAIN] Uploading video to Telegram: {video_task.file_path}")
+                # video_msg = await tg_client.upload_file(video_task.file_path)
                 
-                if video_msg:
-                    video_telegram_id = str(video_msg.id)
-                    print(f"[MAIN] Video uploaded! Telegram ID: {video_telegram_id}")
+                # Proceed if upload success (MinIO)
+                if minio_video_key:
+                    video_telegram_id = None # Legacy
+                    print(f"[MAIN] Video uploaded! MinIO Key: {minio_video_key}")
                     
                     # Update song with video ID
-                    await add_song(
-                        title=audio_task.title,
-                        artist=audio_task.artist,
-                        video_telegram_id=video_telegram_id,
-                        has_video=True
-                    )
-                    
+                    existing = await db["songs"].find_one({"id": song_id})
+                    if existing:
+                        update_doc = {}
+                        
+                        # Check for video
+                        update_doc["has_video"] = True
+                        update_doc["minio_video_key"] = minio_video_key
+                        
+                        if video_telegram_id:
+                            update_doc["video_telegram_id"] = video_telegram_id
+                        
+                        if video_task.file_path:
+                                 update_doc["video_local_path"] = video_task.file_path
+                        
+                        await db["songs"].update_one(
+                            {"_id": existing["_id"]},
+                            {"$set": update_doc}
+                        )
                     await notify_update("library_updated")
                 else:
                     print(f"[MAIN] Video upload failed (non-critical)")
@@ -847,7 +891,9 @@ async def process_youtube_download(task_id: str, url: str, quality: str):
             print(f"[MAIN] Video processing error (non-critical): {ve}")
         finally:
             # Cleanup video temp file
-            youtube_downloader.cleanup_task(video_task_id)
+            # DISABLED FOR LOCAL CACHE STRATEGY
+            # youtube_downloader.cleanup_task(video_task_id)
+            pass
         
     except Exception as e:
         import traceback

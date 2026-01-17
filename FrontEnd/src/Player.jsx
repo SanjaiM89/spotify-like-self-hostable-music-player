@@ -1,52 +1,21 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { getStreamUrl } from './api';
+import React from 'react';
 
-const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, miniBar = false, fullView = false }) => {
-    const audioRef = useRef(null);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [progress, setProgress] = useState(0);
-    const [duration, setDuration] = useState(0);
-    const [volume, setVolume] = useState(0.8);
-    const [showVolume, setShowVolume] = useState(false);
-
-    useEffect(() => {
-        if (currentSong && audioRef.current) {
-            audioRef.current.play().catch(e => console.error("Play error:", e));
-            setIsPlaying(true);
-        }
-    }, [currentSong]);
-
-    useEffect(() => {
-        if (audioRef.current) {
-            audioRef.current.volume = volume;
-        }
-    }, [volume]);
-
-    const togglePlay = () => {
-        if (audioRef.current) {
-            if (isPlaying) {
-                audioRef.current.pause();
-            } else {
-                audioRef.current.play();
-            }
-            setIsPlaying(!isPlaying);
-        }
-    };
-
-    const handleTimeUpdate = () => {
-        if (audioRef.current) {
-            setProgress(audioRef.current.currentTime);
-            setDuration(audioRef.current.duration || 0);
-        }
-    };
-
-    const handleSeek = (e) => {
-        const time = parseFloat(e.target.value);
-        if (audioRef.current) {
-            audioRef.current.currentTime = time;
-            setProgress(time);
-        }
-    };
+const Player = ({
+    currentSong,
+    playlist = [],
+    isPlaying,
+    progress,
+    duration,
+    volume,
+    onTogglePlay,
+    onNext,
+    onPrev,
+    onSeek,
+    onVolumeChange,
+    onSelectSong,
+    miniBar = false,
+    fullView = false
+}) => {
 
     const formatTime = (seconds) => {
         if (!seconds || isNaN(seconds)) return "0:00";
@@ -62,15 +31,19 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
         return (
             <>
                 {/* Bottom Player Bar */}
-                <div className="h-24 glass border-t border-white/10 flex items-center px-6 gap-6">
+                <div className="h-24 glass border-t border-white/10 flex items-center px-6 gap-6 z-40 relative">
                     {/* Left - Song Info */}
                     <div className="flex items-center gap-4 w-64 flex-shrink-0">
                         {currentSong ? (
                             <>
                                 <div className={`w-14 h-14 rounded-lg bg-gradient-to-br from-pink-500/30 to-purple-600/30 flex items-center justify-center ${isPlaying ? 'animate-spin-slow' : ''}`}>
-                                    <svg className="w-7 h-7 text-white/60" fill="currentColor" viewBox="0 0 24 24">
-                                        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-                                    </svg>
+                                    {currentSong.cover_art ? (
+                                        <img src={currentSong.cover_art} alt="" className="w-full h-full object-cover rounded-lg" />
+                                    ) : (
+                                        <svg className="w-7 h-7 text-white/60" fill="currentColor" viewBox="0 0 24 24">
+                                            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                                        </svg>
+                                    )}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <p className="font-semibold truncate text-sm">{currentSong.title}</p>
@@ -95,8 +68,9 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
                                 min="0"
                                 max={duration || 100}
                                 value={progress}
-                                onChange={handleSeek}
+                                onChange={(e) => onSeek(parseFloat(e.target.value))}
                                 className="absolute inset-0 w-full opacity-0 cursor-pointer"
+                                disabled={!currentSong}
                             />
                         </div>
                         <span className="text-xs text-white/40 w-10">{formatTime(duration)}</span>
@@ -104,13 +78,13 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
 
                     {/* Right - Controls & Volume */}
                     <div className="flex items-center gap-4 flex-shrink-0">
-                        <button onClick={onPrev} className="control-btn control-btn-secondary w-10 h-10">
+                        <button onClick={onPrev} className="control-btn control-btn-secondary w-10 h-10" disabled={!currentSong}>
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M6 6h2v12H6V6zm3.5 6 8.5 6V6l-8.5 6z" />
                             </svg>
                         </button>
                         <button
-                            onClick={togglePlay}
+                            onClick={onTogglePlay}
                             className="control-btn control-btn-primary w-12 h-12"
                             disabled={!currentSong}
                         >
@@ -124,7 +98,7 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
                                 </svg>
                             )}
                         </button>
-                        <button onClick={onNext} className="control-btn control-btn-secondary w-10 h-10">
+                        <button onClick={onNext} className="control-btn control-btn-secondary w-10 h-10" disabled={!currentSong}>
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M6 18l8.5-6L6 6v12zm2 0h2V6h-2v12z" transform="scale(-1, 1) translate(-24, 0)" />
                             </svg>
@@ -134,7 +108,7 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
                         <div className="flex items-center gap-2 ml-4">
                             <button
                                 className="text-white/40 hover:text-white transition"
-                                onClick={() => setVolume(volume > 0 ? 0 : 0.8)}
+                                onClick={() => onVolumeChange(volume > 0 ? 0 : 0.8)}
                             >
                                 {volume === 0 ? (
                                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -152,19 +126,12 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
                                 max="1"
                                 step="0.01"
                                 value={volume}
-                                onChange={(e) => setVolume(parseFloat(e.target.value))}
+                                onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
                                 className="w-20"
                             />
                         </div>
                     </div>
                 </div>
-                <audio
-                    ref={audioRef}
-                    src={currentSong ? getStreamUrl(currentSong.id) : undefined}
-                    onTimeUpdate={handleTimeUpdate}
-                    onEnded={onNext}
-                    onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
-                />
             </>
         );
     }
@@ -176,7 +143,11 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
             <div className="flex-1 flex">
                 {/* Main Now Playing Area - Content Centered */}
                 <div className="flex-1 flex flex-col items-center justify-center pb-8 relative overflow-hidden">
-                    {/* Background blur from album art */}
+
+                    {/* VIDEO CONTAINER - The actual video element is in App.jsx but we need space for it */}
+                    {/* If song has video, it will overlay here. If audio only, we show art */}
+
+                    {/* Background blur from album art - Always show as fallback/background */}
                     <div
                         className="absolute inset-0 bg-cover bg-center opacity-30 blur-3xl scale-150"
                         style={{
@@ -186,8 +157,11 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
                         }}
                     />
 
-                    {/* Album Art */}
-                    <div className={`relative z-10 mb-6 ${isPlaying ? 'animate-spin-slow' : ''}`}>
+                    {/* Album Art - Only show if NO video or implicitly handled by App.jsx video overlay z-index */}
+                    {/* We will let App.jsx handle the Video on top. This Art stays here. */}
+                    <div className={`relative z-10 mb-6 ${isPlaying && !currentSong?.has_video ? 'animate-spin-slow' : ''}`}>
+                        {/* Only show vinyl art if NOT video mode? Or let video cover it? 
+                             Let's keep it simple: Art is always here. Video covers if present. */}
                         <div className="w-44 h-44 rounded-full bg-gradient-to-br from-pink-500/30 to-purple-600/30 flex items-center justify-center shadow-2xl shadow-pink-500/20 border-4 border-white/10">
                             {currentSong?.cover_art ? (
                                 <img
@@ -208,8 +182,8 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 border-2 border-white/10 pointer-events-none" />
                     </div>
 
-                    {/* Visualizer */}
-                    {isPlaying && currentSong && (
+                    {/* Visualizer - Audio Only */}
+                    {isPlaying && currentSong && !currentSong.has_video && (
                         <div className="flex items-end justify-center gap-1 h-12 mb-4 z-10">
                             {[...Array(25)].map((_, i) => (
                                 <div
@@ -226,9 +200,11 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
 
                     {/* Song Info */}
                     {currentSong ? (
-                        <div className="text-center z-10 animate-fade-in">
-                            <h1 className="text-2xl font-bold mb-1 bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">{currentSong.title || "Unknown Title"}</h1>
-                            <p className="text-base text-white/60">{currentSong.artist || "Unknown Artist"}</p>
+                        <div className="text-center z-10 animate-fade-in relative">
+                            {/* Gradient background for text readability over video */}
+                            <div className="absolute inset-0 bg-black/40 blur-xl -z-10 rounded-full transform scale-150" />
+                            <h1 className="text-2xl font-bold mb-1 bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent drop-shadow-md">{currentSong.title || "Unknown Title"}</h1>
+                            <p className="text-base text-white/80 drop-shadow-md">{currentSong.artist || "Unknown Artist"}</p>
                         </div>
                     ) : (
                         <div className="text-center z-10">
@@ -239,7 +215,7 @@ const Player = ({ currentSong, onNext, onPrev, playlist = [], onSelectSong, mini
                 </div>
 
                 {/* Right Sidebar - Playlist */}
-                <div className="w-80 glass-dark border-l border-white/5 flex flex-col">
+                <div className="w-80 glass-dark border-l border-white/5 flex flex-col z-20 bg-black/20 backdrop-blur-md">
                     <div className="p-4 border-b border-white/5">
                         <h2 className="text-sm font-semibold text-white/60 uppercase tracking-wider">Up Next</h2>
                     </div>

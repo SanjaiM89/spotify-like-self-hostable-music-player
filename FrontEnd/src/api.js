@@ -47,7 +47,11 @@ export const getRecommendations = async (currentSongId, historyIds) => {
 };
 
 // Helper for streaming URL
-export const getStreamUrl = (songId) => `${API_BASE_URL}/stream/${songId}`;
+export const getStreamUrl = (songId, type) => {
+    let url = `${API_BASE_URL}/stream/${songId}`;
+    if (type) url += `?type=${type}`;
+    return url;
+};
 
 // ==================== YouTube API ====================
 

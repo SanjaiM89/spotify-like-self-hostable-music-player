@@ -22,8 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Expose port (FastAPI defaults to 8000)
-EXPOSE 8000
+# Expose port (FastAPI defaults to 8000, we use Dynamic)
+ENV PORT=8080
+EXPOSE $PORT
 
 # Run the application
 CMD ["python", "main.py"]

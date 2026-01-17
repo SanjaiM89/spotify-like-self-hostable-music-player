@@ -22,7 +22,7 @@ def song_helper(song) -> dict:
     media_type = 'video' if any(file_name.lower().endswith(ext) for ext in video_exts) else 'audio'
     
     # Support new dual-ID schema
-    has_video = song.get("has_video", song.get("video_telegram_id") is not None)
+    has_video = song.get("has_video") or song.get("video_telegram_id") is not None or song.get("minio_video_key") is not None
     
     return {
         "id": str(song["_id"]),
@@ -39,6 +39,10 @@ def song_helper(song) -> dict:
         "file_name": file_name,
         "file_size": song.get("file_size"),
         "media_type": media_type,
+        "audio_local_path": song.get("audio_local_path"),
+        "video_local_path": song.get("video_local_path"),
+        "minio_audio_key": song.get("minio_audio_key"),
+        "minio_video_key": song.get("minio_video_key"),
     }
 
 async def init_db():
@@ -57,7 +61,11 @@ async def add_song(
     thumbnail: str = None,
     audio_telegram_id: str = None,
     video_telegram_id: str = None,
-    has_video: bool = False
+    has_video: bool = False,
+    audio_local_path: str = None,
+    video_local_path: str = None,
+    minio_audio_key: str = None,
+    minio_video_key: str = None
 ):
     """Add a song with optional dual audio/video IDs"""
     # Check for duplicates by file_name or title+artist combo
@@ -94,7 +102,11 @@ async def add_song(
         "cover_art": cover_art,
         "thumbnail": thumbnail or cover_art,
         "file_name": file_name,
-        "file_size": file_size
+        "file_size": file_size,
+        "audio_local_path": audio_local_path,
+        "video_local_path": video_local_path,
+        "minio_audio_key": minio_audio_key,
+        "minio_video_key": minio_video_key
     }
     new_song = await songs_collection.insert_one(song_data)
     return str(new_song.inserted_id)
