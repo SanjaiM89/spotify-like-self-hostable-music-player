@@ -304,10 +304,9 @@ class TelegramClientWrapper:
                 chunk = chunk[:remaining_bytes]
             
             if chunk:
-                # Optimized chunk size for TgCrypto (64KB)
-                formatted_chunk_size = 64 * 1024
-                for i in range(0, len(chunk), formatted_chunk_size):
-                    yield chunk[i:i + formatted_chunk_size]
+                # Optimized chunk size for Video Streaming (1MB)
+                # Removed inner loop to avoid unnecessary fragmentation and overhead
+                yield chunk
                 
                 remaining_bytes -= len(chunk)
 

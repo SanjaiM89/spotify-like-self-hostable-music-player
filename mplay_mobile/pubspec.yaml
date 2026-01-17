@@ -23,6 +23,8 @@ dependencies:
   percent_indicator: ^4.2.3
   video_player: 2.8.6
   chewie: 1.7.0
+  dio: ^5.9.0
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:

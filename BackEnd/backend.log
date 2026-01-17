@@ -1,9 +1,2 @@
-INFO:     Started server process [189092]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 8080): address already in use
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-DEBUG: API_ID=33688695 BIN_CHANNEL=-1003261092648
-Failed to start Telegram Client: database is locked
-[AI] Starting hourly recommendations refresh...
+nohup: ignoring input
+nohup: failed to run command 'python': No such file or directory
