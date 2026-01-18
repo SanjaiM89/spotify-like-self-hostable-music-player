@@ -3,8 +3,9 @@ uvicorn[standard]
 python-multipart
 python-dotenv
 aiohttp
-pyrogram
-tgcrypto
+aiohttp
+telethon
+cryptg
 mutagen
 shazamio
 httpx

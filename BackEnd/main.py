@@ -57,8 +57,26 @@ async def refresh_ai_recommendations():
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
+    
+    # Clean up temp_uploads/youtube on startup
+    youtube_temp_dir = os.path.join(TEMP_DIR, "youtube")
+    if os.path.exists(youtube_temp_dir):
+        import shutil
+        try:
+            shutil.rmtree(youtube_temp_dir)
+            os.makedirs(youtube_temp_dir, exist_ok=True)
+            print(f"[STARTUP] Cleaned temp_uploads/youtube directory")
+        except Exception as e:
+            print(f"[STARTUP] Failed to clean temp directory: {e}")
+    
+    
     try:
         await tg_client.start()
+        
+        # Initialize Telegram Notifier for VPN auto-recovery
+        from telegram_notifier import init_notifier
+        init_notifier(tg_client)
+        print("Telegram Notifier initialized")
     except Exception as e:
         print(f"Failed to start Telegram Client: {e}")
         
@@ -264,67 +282,77 @@ async def upload_files(files: list[UploadFile] = File(...)):
 async def list_songs():
     return await get_all_songs()
 
+# ... (Keep your existing imports and setup) ...
+
 @app.get("/api/stream/{song_id}")
 async def stream_song(song_id: str, request: Request, type: str = None):
     """
-    Stream a song by ID.
-    Optional query param:
-      - type=audio: Force audio stream (uses audio_telegram_id)
-      - type=video: Force video stream (uses video_telegram_id)
-      - Default: Uses legacy telegram_file_id (audio for audio files, video for video files)
+    Stream a song with optimized Range support and Nginx bypass.
     """
     song = await get_song_by_id(song_id)
     if not song:
         raise HTTPException(status_code=404, detail="Song not found")
     
+    # Resolve correct Telegram ID
+    if type == "audio":
+        msg_id_str = song.get("audio_telegram_id") or song.get("telegram_file_id")
+    elif type == "video":
+        msg_id_str = song.get("video_telegram_id")
+        if not msg_id_str:
+            raise HTTPException(status_code=404, detail="Video stream not available")
+    else:
+        msg_id_str = song.get("telegram_file_id")
+    
+    if not msg_id_str:
+         raise HTTPException(status_code=404, detail="Song has no Telegram File ID")
+
+    msg_id = int(msg_id_str)
+
     try:
-        # Determine which Telegram message ID to stream
-        if type == "audio":
-            msg_id_str = song.get("audio_telegram_id") or song.get("telegram_file_id")
-        elif type == "video":
-            msg_id_str = song.get("video_telegram_id")
-            if not msg_id_str:
-                raise HTTPException(status_code=404, detail="Video stream not available for this song")
-        else:
-            # Default: legacy behavior
-            msg_id_str = song.get("telegram_file_id")
-        
-        msg_id = int(msg_id_str)
+        # Get file info
         file_info = await tg_client.get_file_info(msg_id)
         file_size = file_info["file_size"]
+        mime_type = file_info["mime_type"]
         
-        # Range header handling
+        # Parse Range Header (Standard HTTP 206)
         range_header = request.headers.get("Range")
-        start, end = 0, file_size - 1
+        start = 0
+        end = file_size - 1
         
         if range_header:
-            range_match = range_header.replace("bytes=", "").split("-")
-            start = int(range_match[0]) if range_match[0] else 0
-            end = int(range_match[1]) if len(range_match) > 1 and range_match[1] else file_size - 1
+            try:
+                # Format: bytes=0-1024
+                range_str = range_header.replace("bytes=", "")
+                parts = range_str.split("-")
+                start = int(parts[0]) if parts[0] else 0
+                if len(parts) > 1 and parts[1]:
+                    end = int(parts[1])
+            except ValueError:
+                pass
         
-        # Content length for this chunk
+        # Ensure end is valid
+        if end >= file_size: 
+            end = file_size - 1
+            
         content_length = end - start + 1
         
-        async def iter_file():
-            async for chunk in tg_client.stream_file(msg_id, offset=start, limit=content_length):
-                yield chunk
-
+        # Industry Standard Headers for Streaming
         headers = {
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(content_length),
-            "Content-Type": file_info["mime_type"],
-            # Cloudflare/Proxy compatibility
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Content-Type": mime_type,
             "Connection": "keep-alive",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            # CRITICAL: Tells Nginx/Proxies NOT to buffer chunks
+            "X-Accel-Buffering": "no", 
         }
         
         return StreamingResponse(
-            iter_file(),
+            tg_client.stream_file(msg_id, offset=start, limit=content_length),
             status_code=206,
             headers=headers,
-            media_type=file_info["mime_type"]
+            media_type=mime_type
         )
 
     except FileNotFound:
@@ -332,6 +360,8 @@ async def stream_song(song_id: str, request: Request, type: str = None):
     except Exception as e:
         print(f"Stream error: {e}")
         raise HTTPException(status_code=500, detail="Streaming error")
+
+
 
 @app.post("/api/recommend")
 async def recommend(current_song_id: str, history_ids: list[str]):
@@ -1177,7 +1207,7 @@ if __name__ == "__main__":
         host="0.0.0.0", 
         port=port, 
         reload=True,
-        reload_includes=["config.env", "*.env"],
+        reload_includes=["config.env", "*.env", "restart_required.flag"],
         timeout_graceful_shutdown=1
     )
 

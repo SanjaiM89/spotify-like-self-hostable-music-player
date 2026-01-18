@@ -42,8 +42,10 @@ def get_vpn_port():
             with open(port_file, 'r') as f:
                 port = f.read().strip()
                 if port and port.isdigit():
-                    print(f"Found Port in ProtonVPN file: {port}")
+                    print(f"Found Port in ProtonVPN file ({port_file}): {port}")
                     return port
+        else:
+             print(f"ProtonVPN port file not found at: {port_file}")
     except Exception as e:
         print(f"Error reading port file: {e}")
 
@@ -58,17 +60,37 @@ def get_vpn_port():
     
     for cmd in cli_commands:
         try:
+            # Check if command exists first
+            import shutil
+            if not shutil.which(cmd):
+                continue
+                
             print(f"Trying auto-detection with '{cmd}'...")
             try:
+                # Try getting status/pmp info
+                # Older CLI uses 'ks --pmp', new might use 's' or just show it in status
                 result = subprocess.check_output([cmd, "ks", "--pmp"], encoding="utf-8", stderr=subprocess.DEVNULL)
                 import re
                 match = re.search(r"Port[:\s]+(\d+)", result, re.IGNORECASE)
                 if match:
+                    print(f"Found port using '{cmd} ks --pmp': {match.group(1)}")
                     return match.group(1)
             except subprocess.CalledProcessError:
-                pass  # Command failed or not supported
+                # Try alternatives for different versions
+                try:
+                    # Some versions show it in 'status'
+                    result = subprocess.check_output([cmd, "s"], encoding="utf-8", stderr=subprocess.DEVNULL)
+                    match = re.search(r"P2P[:\s]+Enabled.*Port[:\s]+(\d+)", result, re.IGNORECASE | re.DOTALL)
+                    if not match: # Try simple port search
+                        match = re.search(r"Port[:\s]+(\d+)", result, re.IGNORECASE)
+                    
+                    if match:
+                        print(f"Found port using '{cmd} s': {match.group(1)}")
+                        return match.group(1)
+                except:
+                    pass
             except FileNotFoundError:
-                continue  # Binary not found, try next
+                continue
 
         except Exception as e:
             print(f"Error checking {cmd}: {e}")
@@ -260,6 +282,100 @@ def main():
         final_port = port if port else saved_port
         if final_port:
              update_config_env(final_port)
+
+def rotate_vpn_location():
+    """
+    Rotate ProtonVPN to a different server location
+    Returns: (success: bool, new_ip: str, new_port: int, server: str)
+    """
+    print("🔄 Starting VPN rotation...")
+    
+    try:
+        # Get current IP before disconnection
+        old_ip = get_public_ip()
+        print(f"Current IP: {old_ip}")
+        
+        # List of preferred countries (residential IPs, good YouTube access)
+        preferred_countries = ["US", "CA", "GB", "DE", "FR", "NL", "SE", "CH"]
+        
+        # Disconnect current VPN
+        print("Disconnecting current VPN...")
+        subprocess.run(["protonvpn-cli", "disconnect"], check=False, capture_output=True)
+        time.sleep(3)
+        
+        # Try connecting to random country
+        import random
+        country = random.choice(preferred_countries)
+        
+        print(f"Connecting to ProtonVPN ({country})...")
+        result = subprocess.run(
+            ["protonvpn-cli", "connect", "--cc", country],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode != 0:
+            print(f"Connection failed: {result.stderr}")
+            return (False, None, None, None)
+        
+        # Wait for connection to stabilize
+        print("Waiting for connection to stabilize...")
+        time.sleep(10)
+        
+        # Get new IP
+        new_ip = get_public_ip()
+        if not new_ip or new_ip == old_ip:
+            print("IP did not change!")
+            return (False, None, None, None)
+        
+        # Get new port (wait for port forwarding)
+        max_wait = 30
+        new_port = None
+        for _ in range(max_wait):
+            new_port = get_vpn_port()
+            if new_port:
+                break
+            time.sleep(1)
+        
+        if not new_port:
+            print("Warning: Could not detect port, but VPN connected")
+        
+        # Update DuckDNS and config
+        print(f"New IP: {new_ip}, Port: {new_port}")
+        update_duckdns(new_ip)
+        if new_port:
+            update_config_env(new_port)
+            # Signal backend to restart (uvicorn will detect this)
+            restart_signal = "restart_required.flag"
+            with open(restart_signal, 'w') as f:
+                f.write(f"{time.time()}\n{new_port}\n")
+        save_to_db(new_ip, new_port)
+        
+        # Get server info
+        server_info = subprocess.run(
+            ["protonvpn-cli", "status"],
+            capture_output=True,
+            text=True
+        )
+        server = country
+        if "Server:" in server_info.stdout:
+            import re
+            match = re.search(r'Server:\s+(.+)', server_info.stdout)
+            if match:
+                server = match.group(1).strip()
+        
+        print(f"✅ VPN rotation successful! New IP: {new_ip}, Server: {server}")
+        return (True, new_ip, new_port, server)
+        
+    except subprocess.TimeoutExpired:
+        print("❌ VPN connection timeout")
+        return (False, None, None, None)
+    except Exception as e:
+        print(f"❌ VPN rotation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return (False, None, None, None)
 
 if __name__ == "__main__":
     main()

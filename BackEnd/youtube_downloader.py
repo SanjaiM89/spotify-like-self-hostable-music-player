@@ -144,30 +144,51 @@ class YouTubeDownloader:
 
     def _extract_playlist_info_sync(self, url: str) -> list[Dict[str, Any]]:
         """Sync worker for playlist extraction"""
+        # For single video URLs, skip extraction (saves API call and avoids bot detection)
+        video_id = self.extract_video_id(url)
+        if video_id and 'list=' not in url:
+            # It's a single video, not a playlist
+            print(f"[YT] Single video detected, skipping playlist extraction")
+            return [{
+                'url': f"https://www.youtube.com/watch?v={video_id}",
+                'title': 'Video',  # Title will be fetched later during download
+                'id': video_id
+            }]
+        
+        # For playlists, we need to extract the list
         ydl_opts = {
-            'extract_flat': True,  # Don't download, just get metadata
+            'extract_flat': 'in_playlist',  # Only extract flat for playlist entries
             'quiet': True,
             'ignoreerrors': True,
             'no_warnings': True,
+            'js_runtimes': {'node': {}},
         }
+        
+        
+        # Use live browser cookies (more reliable than static file)
+        ydl_opts["cookiesfrombrowser"] = ("chrome",)
+        print(f"[YT] Using live cookies from Chrome browser for playlist")
         
         with YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=False)
-                if 'entries' in info:
+                if info and 'entries' in info:
                     # It's a playlist
                     return [{
                         'url': f"https://www.youtube.com/watch?v={entry['id']}",
                         'title': entry.get('title', 'Unknown'),
                         'id': entry.get('id')
                     } for entry in info['entries'] if entry]
-                else:
-                    # It's a single video, return as list of one
+                elif info:
+                    # Single video from playlist URL somehow
                     return [{
                         'url': info.get('webpage_url', url),
                         'title': info.get('title', 'Unknown'),
                         'id': info.get('id')
                     }]
+                else:
+                    print(f"[YT] No info returned from extraction")
+                    return []
             except Exception as e:
                 print(f"Error extracting playlist: {e}")
                 return []
@@ -179,11 +200,12 @@ class YouTubeDownloader:
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
+            "js_runtimes": {"node": {}},  # Enable Node.js for YouTube signature solving
         }
         
-        # Add cookies if file exists
-        if os.path.exists(COOKIES_FILE):
-            opts["cookiefile"] = COOKIES_FILE
+        # Use live browser cookies (more reliable than static file)
+        opts["cookiesfrombrowser"] = ("chrome",)
+        print(f"[YT] Using live cookies from Chrome browser")
         
         def _extract():
             with YoutubeDL(opts) as ydl:
@@ -274,6 +296,11 @@ class YouTubeDownloader:
                     broadcast_callback(task)
                     last_broadcast[0] = now
                     
+                # Log progress every 2 seconds
+                if now - last_broadcast[0] > 2.0 or downloaded == total:
+                    pct = (downloaded / total * 100) if total > 0 else 0
+                    print(f"[YT] Downloading: {pct:.1f}% ({task.speed}, ETA: {task.eta})")
+                    
             elif d["status"] == "finished":
                 task.status = DownloadStatus.CONVERTING
                 task.progress = 80
@@ -338,6 +365,7 @@ class YouTubeDownloader:
                 "outtmpl": output_template,
                 "quiet": True,
                 "no_warnings": True,
+                "js_runtimes": {"node": {}},  # Enable Node.js for YouTube signature solving
                 "progress_hooks": [self._create_progress_hook(task, broadcast_callback)],
                 "merge_output_format": "mp4",
                 "writethumbnail": True,
@@ -365,10 +393,9 @@ class YouTubeDownloader:
                 },
             }
             
-            # Add cookies if file exists
-            if os.path.exists(COOKIES_FILE):
-                opts["cookiefile"] = COOKIES_FILE
-                print(f"[YT] Using cookies from {COOKIES_FILE}")
+            # Use live browser cookies (more reliable than static file)
+            opts["cookiesfrombrowser"] = ("chrome",)
+            print(f"[YT] Using live cookies from Chrome browser")
             
             # Download in thread pool
             def _download():
@@ -469,6 +496,7 @@ class YouTubeDownloader:
                 "outtmpl": output_template,
                 "quiet": True,
                 "no_warnings": True,
+                "js_runtimes": {"node": {}},  # Enable Node.js for YouTube signature solving
                 "progress_hooks": [self._create_progress_hook(task, broadcast_callback)],
                 "postprocessors": [
                     {
@@ -492,29 +520,32 @@ class YouTubeDownloader:
                 "retries": 10,
                 "fragment_retries": 10,
                 "retry_sleep_functions": {
-                    "http": lambda n: 3,       # 3 seconds between HTTP retries
-                    "fragment": lambda n: 3,   # 3 seconds between fragment retries
+                    "http": lambda n: 3,
+                    "fragment": lambda n: 3,
                     "file_access": lambda n: 3,
-                    "extractor": lambda n: 3,  # 3 seconds between extractor retries
+                    "extractor": lambda n: 3,
                 },
-                "sleep_interval": 2,  # Base delay between requests
+                "sleep_interval": 2,
                 "max_sleep_interval": 10,
-                "sleep_interval_requests": 1,  # Delay between file requests
+                "sleep_interval_requests": 1,
                 "http_headers": {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     "Accept-Language": "en-US,en;q=0.9",
                 },
             }
             
-            # Add cookies if file exists
-            if os.path.exists(COOKIES_FILE):
-                opts["cookiefile"] = COOKIES_FILE
-                print(f"[YT] Using cookies from {COOKIES_FILE}")
+            # Use live browser cookies (more reliable than static file)
+            opts["cookiesfrombrowser"] = ("chrome",)
+            print(f"[YT] Using live cookies from Chrome browser")
             
             # Download in thread pool
             def _download():
                 print(f"[YT] Starting download for task {task_id}")
-                with YoutubeDL(opts) as ydl:
+                # Temporarily enable verbose to see cookie extraction
+                opts_verbose = opts.copy()
+                opts_verbose["quiet"] = False
+                opts_verbose["verbose"] = True
+                with YoutubeDL(opts_verbose) as ydl:
                     ydl.download([url])
                 print(f"[YT] Download complete for task {task_id}")
             
@@ -547,13 +578,58 @@ class YouTubeDownloader:
             return task
             
         except Exception as e:
+            error_msg = str(e)
+            
+            # Detect YouTube IP block
+            is_youtube_block = (
+                "Sign in to confirm you're not a bot" in error_msg or
+                "HTTP Error 403: Forbidden" in error_msg
+            )
+            
+            if is_youtube_block and not hasattr(task, '_retry_count'):
+                print("[YT] 🚫 YouTube IP block detected!")
+                
+                # Import modules
+                try:
+                    from telegram_notifier import notifier
+                    from vpn_manager import rotate_vpn_location, get_public_ip
+                    
+                    current_ip = get_public_ip()
+                    
+                    # Notify owner
+                    if notifier:
+                        await notifier.notify_youtube_block(url, current_ip)
+                        await notifier.notify_vpn_rotating(current_ip)
+                    
+                    # Attempt VPN rotation
+                    success, new_ip, new_port, server = rotate_vpn_location()
+                    
+                    if success and notifier:
+                        await notifier.notify_vpn_success(new_ip, new_port, server)
+                        await notifier.notify_download_retry(url)
+                        
+                        # Wait for IP propagation
+                        await asyncio.sleep(5)
+                        
+                        # Mark for retry
+                        task._retry_count = 1
+                        print("[YT] Retrying download after VPN rotation...")
+                        # Retry the download
+                        return await self.download_audio(task_id, url, title, artist, quality, broadcast_callback)
+                    else:
+                        if notifier:
+                            await notifier.notify_vpn_failed(error_msg)
+                except Exception as vpn_error:
+                    print(f"[YT] VPN rotation error: {vpn_error}")
+            
+            # Mark as failed
             if task.task_id in self._cancelled_tasks:
                 task.status = DownloadStatus.CANCELLED
                 task.error = "Cancelled by user"
                 self._cancelled_tasks.discard(task.task_id)
             else:
                 task.status = DownloadStatus.FAILED
-                task.error = str(e)
+                task.error = error_msg
             return task
     
     def cancel_download(self, task_id: str) -> bool:
@@ -586,15 +662,20 @@ class YouTubeDownloader:
             if task.file_path and os.path.exists(task.file_path):
                 try:
                     os.remove(task.file_path)
-                except Exception:
-                    pass
-            # Also clean up any thumbnail files
+                    print(f"[YT] Cleaned up: {os.path.basename(task.file_path)}")
+                except Exception as e:
+                    print(f"[YT] Cleanup failed: {e}")
+            # Also clean up any thumbnail/part files
+            cleaned = 0
             for f in os.listdir(DOWNLOAD_DIR):
                 if f.startswith(task_id):
                     try:
                         os.remove(os.path.join(DOWNLOAD_DIR, f))
+                        cleaned += 1
                     except Exception:
                         pass
+            if cleaned > 0:
+                print(f"[YT] Cleaned {cleaned} temp files for task {task_id[:8]}")
 
 
 def get_task(task_id: str) -> Optional[DownloadTask]:

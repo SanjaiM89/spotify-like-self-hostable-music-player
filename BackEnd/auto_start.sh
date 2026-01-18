@@ -31,17 +31,22 @@ while true; do
     date
     
     # 1. CHECK VPN CONNECTIVITY
-    # Check for 'proton0' or 'tun0' interface or check public IP?
-    # The new CLI doesn't have a 'status' command.
-    # We'll check if the proton interface exists.
-    STATUS=$(ip -o link show | grep -iE "proton|tun")
+    # Check for 'proton', 'tun', or 'wg' (WireGuard) interfaces
+    STATUS=$(ip -o link show | grep -iE "proton|tun|wg")
+    
+    # Check if GUI is running
+    GUI_RUNNING=$(pgrep -f "protonvpn-app")
     
     if [ -z "$STATUS" ]; then
-        echo "❌ VPN Disconnected. Attempting to connect..."
-        
-        # Attempt connection (Blocking)
-        # Official CLI v0.1.3 uses just 'connect' (defaults to fastest)
-        $PROTON_CMD connect
+        if [ ! -z "$GUI_RUNNING" ]; then
+             echo "⚠️  VPN Disconnected but Proton GUI is open."
+             echo "   Attempting to use CLI might fail. Please connect via GUI manually."
+             # We won't force connect if GUI is open to avoid conflict message
+        else
+            echo "❌ VPN Disconnected. Attempting to connect..."
+            # Attempt connection (Blocking)
+            $PROTON_CMD connect
+        fi
         
         if [ $? -eq 0 ]; then
             echo "✅ VPN Connected!"
